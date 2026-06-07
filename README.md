@@ -103,4 +103,3 @@ with 5% injected outliers.
 - **The reduction** (`centroids`, `H`) is the global-synchronization point that
   will dominate MPI scaling once NN is fast; the SVD itself is a fixed `3×3` and
   stays on one rank/thread.
-# parallel-icp-registration

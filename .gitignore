@@ -1,0 +1,7 @@
+# build artifacts
+build/
+bin/
+
+# runtime outputs (PCD dumps + renders)
+*.pcd
+*.png
