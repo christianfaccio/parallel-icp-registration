@@ -1,6 +1,7 @@
 # build artifacts
 build/
 bin/
+docs/
 
 # runtime outputs (PCD dumps + renders)
 *.pcd
