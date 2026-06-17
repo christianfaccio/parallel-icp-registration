@@ -18,6 +18,8 @@
  * source_aligned.pcd for tools/render_pcd.py.
  */
 
+#define _POSIX_C_SOURCE 199309L
+
 #include "pointcloud.h"
 #include "linalg.h"
 #include "icp.h"
@@ -29,6 +31,12 @@
 #include <math.h>
 #include <time.h>
 
+#ifdef __ARM_NEON__
+#include <arm_neon.h>
+#elif defined (__AVX__) || defined (__AVX2__)
+#include <immintrin.h>
+#endif
+
 static double now_sec(void)
 {
 	struct timespec ts;
@@ -38,7 +46,7 @@ static double now_sec(void)
 
 int main(int argc, char **argv)
 {
-	int      n         = argc > 1 ? atoi(argv[1]) : 50000;
+	int      n         = argc > 1 ? atoi(argv[1]) : 100000;
 	int      max_iters = argc > 2 ? atoi(argv[2]) : 50;
 	double   perturb   = argc > 3 ? atof(argv[3]) : 1.0;
 	int      use_kd    = 1;

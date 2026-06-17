@@ -3,6 +3,8 @@
  * self-contained pass so the parallel backends can replace one at a time.
  */
 
+#define _POSIX_C_SOURCE 199309L
+
 #include "icp.h"
 #include "kdtree.h"
 #include "linalg.h"
@@ -10,6 +12,12 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
+
+#ifdef __ARM_NEON__
+#include <arm_neon.h>
+#elif defined (__AVX__) || defined (__AVX2__)
+#include <immintrin.h>
+#endif
 
 static double now_sec(void)
 {
@@ -58,30 +66,33 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 		t0 = now_sec();
 		double cs[3] = {0,0,0}, ct[3] = {0,0,0};
 		long   m = 0;
+		double mask;
+		#pragma GCC ivdep
 		for (int i = 0; i < cur.n; i++) {
-			if (match[i] < 0) continue;
-			int j = match[i];
-			cs[0] += cur.x[i]; cs[1] += cur.y[i]; cs[2] += cur.z[i];
-			ct[0] += tgt->x[j]; ct[1] += tgt->y[j]; ct[2] += tgt->z[j];
-			m++;
+			mask = (double)(match[i] >= 0);
+			int j = (match[i] >= 0) ? match[i] : 0;	// safe
+			cs[0] += cur.x[i] * mask; cs[1] += cur.y[i] * mask; cs[2] += cur.z[i] * mask;
+			ct[0] += tgt->x[j] * mask; ct[1] += tgt->y[j] * mask; ct[2] += tgt->z[j] * mask;
+			m += (long)mask;
 		}
 		if (m < 3) { res->t_solve += now_sec() - t0; break; }  /* under-constrained */
 		for (int k = 0; k < 3; k++) { cs[k] /= (double)m; ct[k] /= (double)m; }
 
 		double H[9] = {0,0,0,0,0,0,0,0,0};
 		double sse  = 0.0;
+		#pragma GCC ivdep
 		for (int i = 0; i < cur.n; i++) {
-			if (match[i] < 0) continue;
-			int j = match[i];
+			mask = (double)(match[i] >= 0);
+			int j = (match[i] >= 0) ? match[i] : 0;	// safe
 			double sx = cur.x[i] - cs[0], sy = cur.y[i] - cs[1], sz = cur.z[i] - cs[2];
 			double tx = tgt->x[j] - ct[0], ty = tgt->y[j] - ct[1], tz = tgt->z[j] - ct[2];
-			H[0] += sx*tx; H[1] += sx*ty; H[2] += sx*tz;
-			H[3] += sy*tx; H[4] += sy*ty; H[5] += sy*tz;
-			H[6] += sz*tx; H[7] += sz*ty; H[8] += sz*tz;
+			H[0] += sx*tx*mask; H[1] += sx*ty*mask; H[2] += sx*tz*mask;
+			H[3] += sy*tx*mask; H[4] += sy*ty*mask; H[5] += sy*tz*mask;
+			H[6] += sz*tx*mask; H[7] += sz*ty*mask; H[8] += sz*tz*mask;
 			double ex = cur.x[i] - tgt->x[j];
 			double ey = cur.y[i] - tgt->y[j];
 			double ez = cur.z[i] - tgt->z[j];
-			sse += ex*ex + ey*ey + ez*ez;       /* residual at start of iter */
+			sse += (ex*ex + ey*ey + ez*ez)*mask;       /* residual at start of iter */
 		}
 
 		/* --- 4a. solve for this step's R,T ------------------------------ */
