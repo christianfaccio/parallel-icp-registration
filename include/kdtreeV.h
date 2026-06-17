@@ -17,21 +17,34 @@
 #include <string.h>
 #include "pointcloud.h"
 
-typedef float v8f __attribute__((vector_size(8*sizeof(float))));
-typedef float v8f_u __attribute__((vector_size(8*sizeof(float)), aligned(4)));
-typedef int v8i __attribute__((vector_size(32)));	// same width of v8f
+/*
+ * SIMD width KD_W = lanes per node bucket / per brute-force step.
+ *   x86 AVX  -> 256-bit registers -> 8 floats
+ *   ARM NEON -> 128-bit registers -> 4 floats
+ * The whole algorithm is width-generic; this is the ONLY place the x86 and
+ * ARM "versions" differ. Selected automatically from the target arch.
+ */
+#if defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
+	#define KD_W 4
+#else
+	#define KD_W 8
+#endif
 
-// NOTE: this implementation is not memory efficient, 
+typedef float vf   __attribute__((vector_size(KD_W * sizeof(float))));
+typedef float vf_u __attribute__((vector_size(KD_W * sizeof(float)), aligned(4)));
+typedef int   vi   __attribute__((vector_size(KD_W * sizeof(int))));  /* same width as vf */
+
+// NOTE: this implementation is not memory efficient,
 // implement a union for better memory management
 typedef struct {
 	/* leaf */
-	float xs[8], ys[8], zs[8];	// arrays of points' coordinates
-	int idx[8];	/* lane -> target point index */
+	float xs[KD_W], ys[KD_W], zs[KD_W];	// arrays of points' coordinates
+	int idx[KD_W];	/* lane -> target point index */
 	int count;	/* -1: internal */
 
 	/* internal */
 	int axis;    /* split axis: 0=x, 1=y, 2=z */
-	float split; /* routing threshold */ 
+	float split; /* routing threshold */
 	int left;    /* child node indices, or -1 */
 	int right;
 } KDNodeV;
