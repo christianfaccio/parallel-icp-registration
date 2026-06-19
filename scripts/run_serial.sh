@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Runs bin/baseline/icp_baseline over a geometric sweep of n that brackets the
+# Runs bin/serial/icp_serial over a geometric sweep of n that brackets the
 # L1/L2/L3 cache boundaries, and emits a CSV whose key column is the AMORTIZED
 # time per nearest-neighbour query:
 #
@@ -18,10 +18,10 @@
 #  If you ever get a DCGP allocation, the markers become 1755 / 74898 / 3932160.)
 #
 # Usage:
-#     make baseline
-#     scripts/run_baseline.sh [output.csv] [core] [max_iters] [seed]
+#     make serial
+#     scripts/run_serial.sh [output.csv] [core] [max_iters] [seed]
 #
-# Defaults: out=baseline.csv, core=1, max_iters=50, seed=12345.
+# Defaults: out=baseline_sweep.csv, core=1, max_iters=50, seed=12345.
 # Pin to an isolated core for stable counters; on Leonardo run inside an
 # salloc'd DCGP compute node, never the login node.
 
@@ -32,15 +32,15 @@ set -euo pipefail
 export LC_ALL=C
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$HERE/bin/baseline/icp_baseline"
+BIN="$HERE/bin/serial/icp_serial"
 
-OUT="${1:-out/baseline/baseline.csv}"
+OUT="${1:-out/serial/serial.csv}"
 CORE="${2:-auto}"   # "auto" = pin to the first CPU in our cgroup; or an explicit id; "none" = no pin
 MAX_ITERS="${3:-50}"
 SEED="${4:-12345}"
 
 if [[ ! -x "$BIN" ]]; then
-	echo "error: $BIN not found. Build it first with: make baseline" >&2
+	echo "error: $BIN not found. Build it first with: make serial" >&2
 	exit 1
 fi
 
