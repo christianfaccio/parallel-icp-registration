@@ -90,6 +90,28 @@ run_vec: $(TARGET_VEC)
 debug: CFLAGS := $(CSTD) $(WARN) -O0 -g
 debug: clean $(TARGET)
 
+# ---- Unoptimized timing baseline --------------------------------------------
+# A *true* serial baseline: -O0, no -march/native, no vectorization. Built into
+# its own dirs so it neither collides with nor gets clobbered by `make all`.
+# Used by tools/sweep_baseline.sh to measure NN cost vs cache size.
+BUILD_DIR_BASE := build/baseline
+BIN_DIR_BASE   := bin/baseline
+OBJECTS_BASE   := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR_BASE)/%.o,$(SOURCES))
+TARGET_BASE    := $(BIN_DIR_BASE)/icp_baseline
+BASE_CFLAGS    := $(CSTD) $(WARN) -O0
+
+.PHONY: baseline
+baseline: $(TARGET_BASE)
+
+$(TARGET_BASE): $(OBJECTS_BASE) | $(BIN_DIR_BASE)
+	$(CC) $(BASE_CFLAGS) $(OBJECTS_BASE) $(LDLIBS) -o $@
+
+$(BUILD_DIR_BASE)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR_BASE)
+	$(CC) $(CPPFLAGS) $(BASE_CFLAGS) -MMD -MP -c $< -o $@
+
+$(BUILD_DIR_BASE) $(BIN_DIR_BASE):
+	mkdir -p $@
+
 # AddressSanitizer build: catches leaks, use-after-free, out-of-bounds.
 .PHONY: asan
 asan: CFLAGS := $(CSTD) $(WARN) -O1 -g -fsanitize=address,undefined
@@ -106,7 +128,7 @@ asan: clean $(TARGET)
 
 .PHONY: clean
 clean:
-	rm -rf $(BUILD_DIR) $(BIN_DIR) $(BUILD_DIR_VEC) $(BIN_DIR_VEC)
+	rm -rf $(BUILD_DIR) $(BIN_DIR) $(BUILD_DIR_VEC) $(BIN_DIR_VEC) $(BUILD_DIR_BASE) $(BIN_DIR_BASE)
 
 # Auto-generated header dependencies (-MMD). Silently ignored on first build.
 -include $(OBJECTS:.o=.d)
