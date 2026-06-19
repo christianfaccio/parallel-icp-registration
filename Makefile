@@ -2,6 +2,8 @@
 #
 # Targets:
 #   make            build the serial solver (bin/icp_serial)
+#   make serial     same as `make` (optimized serial: -O3 -march=native)
+#   make baseline   unoptimized serial (-O0) for the cache-sweep timing baseline
 #   make run        build then run with default arguments
 #   make debug      build with -O0 -g for gdb
 #   make asan       build with AddressSanitizer + UBSan
@@ -52,6 +54,10 @@ TARGET_VEC	:= $(BIN_DIR_VEC)/icp_vectorized
 
 .PHONY: all
 all: $(TARGET)
+
+# Alias: build the optimized serial solver (same as `make all`).
+.PHONY: serial
+serial: $(TARGET)
 
 $(TARGET): $(OBJECTS) | $(BIN_DIR)
 	$(CC) $(CFLAGS) $(OBJECTS) $(LDLIBS) -o $@
