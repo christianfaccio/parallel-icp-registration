@@ -2,8 +2,9 @@
 build/
 bin/
 docs/
-out/
 
 # runtime outputs (PCD dumps + renders)
 *.pcd
 *.png
+out/
+.DS_Store
