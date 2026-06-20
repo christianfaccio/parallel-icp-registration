@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J icp_baseline
+#SBATCH -J icp_vectorized
 #SBATCH -p boost_usr_prod
 #SBATCH -A uTS26_Tornator
 #SBATCH --qos=boost_qos_dbg
@@ -10,4 +10,4 @@
 #SBATCH -t 00:20:00
 #SBATCH -o serial_%j.out -e serial_%j.err
 
-bash scripts/run_baseline.sh baseline.csv none 50 12345
+bash scripts/run_vectorized.sh vectorized.csv none 50 12345

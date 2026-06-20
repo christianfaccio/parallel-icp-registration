@@ -27,7 +27,7 @@
 #if defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
 	#define KD_W 4
 #else
-	#define KD_W 8
+	#define KD_W 16
 #endif
 
 typedef float vf   __attribute__((vector_size(KD_W * sizeof(float))));
