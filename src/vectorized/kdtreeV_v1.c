@@ -83,20 +83,6 @@ static int build_rec(KDTreeV *t, int *next, int lo, int hi, int depth)
 	t->nodes[node].split = coord(t->pts, t->perm[mid], axis);  /* read before recursing */
 	t->nodes[node].left  = build_rec(t, next, lo, mid, depth + 1);
 	t->nodes[node].right = build_rec(t, next, mid, hi, depth + 1);  /* mid stays on the right */
-	
-	// BFS post-implementation
-	int queue[t->n];
-	int head = 0, tail = 0;
-	queue[tail++] = t->root;
-	while (head < tail)
-	{
-		int node = queue[head++];
-		int left = t->nodes[node].left;
-		int right = t->nodes[node].right;
-		if (left >= 0) queue[tail++] = left;
-		if (right >= 0) queue[tail++] = right;
-	}
-
 	return node;
 }
 
@@ -181,7 +167,7 @@ static void nn_search(const KDTreeV *t, float qx, float qy, float qz,
 	{
 		sp--;
 		if (bound[sp] >= *best_d2) continue;
-		const KDNodeV *nd = &t->nodes[sp];
+		const KDNodeV *nd = &t->nodes[stack[sp]];
 
 		/* leaf: one SIMD distance op over the bucket, then a local reduction */
 		if (nd->count >= 0)
