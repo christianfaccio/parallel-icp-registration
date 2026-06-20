@@ -17,10 +17,9 @@
 #   Only src/vectorized/kdtreeV_vN.c differs per version; the other vectorized
 #   sources are shared and compiled once.
 #
-# OpenMP (same vectorized sources + -fopenmp; query loop in icp.c is threaded):
-#   make omp        build ALL versions threaded (bin/openmp/icp_openmp_vN)
-#   make omp_v1     build only the flattened backend, threaded
-#   make run_omp_v1 build then run it (set OMP_NUM_THREADS to pick thread count)
+# OpenMP (src/openmp/ backend: flattened kd-tree + threaded query loop):
+#   make omp        build bin/openmp/icp_openmp (vectorized leaf + -fopenmp)
+#   make run_omp    build then run it (set OMP_NUM_THREADS to pick thread count)
 #
 #   make clean      remove all build artifacts
 
@@ -101,41 +100,36 @@ run_vec_$(1): $(BIN_DIR_VEC)/icp_vectorized_$(1)
 endef
 $(foreach V,$(VERSIONS),$(eval $(call VEC_RULE,$(V))))
 
-# ---- OpenMP: vectorized sources + -fopenmp ----------------------------------
-# Reuses the src/vectorized/ sources (the threaded query loop lives in icp.c).
-# Built into its own dirs so OMP objects never collide with the plain vec build,
-# which stays as the single-thread baseline (a `parallel for` without -fopenmp
-# is just ignored). Pick threads at run time with OMP_NUM_THREADS.
+# ---- OpenMP: dedicated src/openmp/ backend ----------------------------------
+# Its own sources (flattened kd-tree + the threaded query loop in icp.c),
+# compiled with VEC for the SIMD leaf and -fopenmp for the threads. Single
+# binary; pick the thread count at run time with OMP_NUM_THREADS.
 
 OMP           := -fopenmp
+SRC_DIR_OMP   := src/openmp
 BUILD_DIR_OMP := build/openmp
 BIN_DIR_OMP   := bin/openmp
 
-# VEC for the SIMD leaf, OMP for the threads. VEC_INFO dropped to cut noise.
-OMP_CFLAGS     := $(CFLAGS) $(VEC) $(OMP)
-COMMON_OMP_OBJ := $(patsubst $(SRC_DIR_VEC)/%.c,$(BUILD_DIR_OMP)/%.o,$(COMMON_VEC_SRC))
+OMP_CFLAGS  := $(CFLAGS) $(VEC) $(OMP)
+SOURCES_OMP := $(wildcard $(SRC_DIR_OMP)/*.c)
+OBJECTS_OMP := $(patsubst $(SRC_DIR_OMP)/%.c,$(BUILD_DIR_OMP)/%.o,$(SOURCES_OMP))
+TARGET_OMP  := $(BIN_DIR_OMP)/icp_openmp
 
-$(BUILD_DIR_OMP)/%.o: $(SRC_DIR_VEC)/%.c | $(BUILD_DIR_OMP)
+.PHONY: omp
+omp: $(TARGET_OMP)
+
+$(TARGET_OMP): $(OBJECTS_OMP) | $(BIN_DIR_OMP)
+	$(CC) $(OMP_CFLAGS) $(OBJECTS_OMP) $(LDLIBS) -o $@
+
+$(BUILD_DIR_OMP)/%.o: $(SRC_DIR_OMP)/%.c | $(BUILD_DIR_OMP)
 	$(CC) $(CPPFLAGS) $(OMP_CFLAGS) -MMD -MP -c $< -o $@
 
 $(BUILD_DIR_OMP) $(BIN_DIR_OMP):
 	mkdir -p $@
 
-.PHONY: omp
-omp: $(foreach V,$(VERSIONS),$(BIN_DIR_OMP)/icp_openmp_$(V))
-
-define OMP_RULE
-$(BIN_DIR_OMP)/icp_openmp_$(1): $$(COMMON_OMP_OBJ) $$(BUILD_DIR_OMP)/kdtreeV_$(1).o | $$(BIN_DIR_OMP)
-	$$(CC) $$(OMP_CFLAGS) $$^ $$(LDLIBS) -o $$@
-
-.PHONY: omp_$(1)
-omp_$(1): $(BIN_DIR_OMP)/icp_openmp_$(1)
-
-.PHONY: run_omp_$(1)
-run_omp_$(1): $(BIN_DIR_OMP)/icp_openmp_$(1)
-	./$$<
-endef
-$(foreach V,$(VERSIONS),$(eval $(call OMP_RULE,$(V))))
+.PHONY: run_omp
+run_omp: $(TARGET_OMP)
+	./$(TARGET_OMP)
 
 # ---- Convenience -------------------------------------------------------------
 
