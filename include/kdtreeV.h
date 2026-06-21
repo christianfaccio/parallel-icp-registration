@@ -68,4 +68,13 @@ void kd_nearest(const KDTreeV *t, float qx, float qy, float qz,
 void bf_nearest(const PointCloud *pts, float qx, float qy, float qz,
                 int *best_idx, float *best_d2);
 
+/* Nearest point to (qx,qy,qz); writes the point index and squared distance. */
+void kd_nearest_simd(const KDTreeV *t, vf qx, vf qy, vf qz,
+                vi *best_idx, vf *best_d2);
+
+/* Brute-force equivalent, for benchmarking and as a correctness oracle. */
+void bf_nearest_simd(const PointCloud *pts, vf qx, vf qy, vf qz,
+                vi *best_idx, vf *best_d2);
+
+
 #endif /* ICP_KDTREEV_H_ */
