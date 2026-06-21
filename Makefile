@@ -14,8 +14,8 @@
 #   make vec_v2     build only ..._v2                            (parallel queries)
 #   make run_vec_v1 build then run a specific version
 #
-#   Only src/vectorized/kdtreeV_vN.c differs per version; the other vectorized
-#   sources are shared and compiled once.
+#   Each src/vectorized/<ver>/ is a self-contained source set (its own icp.c,
+#   kdtreeV*.c, main.c, ...), built into its own binary.
 #
 # OpenMP (src/openmp/ backend: flattened kd-tree + threaded query loop):
 #   make omp        build bin/openmp/icp_openmp (vectorized leaf + -fopenmp)
@@ -60,7 +60,10 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 $(BUILD_DIR) $(BIN_DIR):
 	mkdir -p $@
 
-# ---- Vectorized: versioned kd-tree backends ---------------------------------
+# ---- Vectorized: versioned kd-tree backends (folder-per-version) ------------
+# Each src/vectorized/<ver>/ is a self-contained source set. A version is built
+# by compiling everything under its folder into bin/vectorized/icp_vectorized_<ver>,
+# with objects kept apart in build/vectorized/<ver>/.
 
 SRC_DIR_VEC   := src/vectorized
 BUILD_DIR_VEC := build/vectorized
@@ -68,34 +71,35 @@ BIN_DIR_VEC   := bin/vectorized
 
 VERSIONS := v0 v1 v2
 
-# Per-version source is kdtreeV_vN.c; everything else is shared.
-VERSIONED_VEC_SRC := $(wildcard $(SRC_DIR_VEC)/kdtreeV_v*.c)
-COMMON_VEC_SRC    := $(filter-out $(VERSIONED_VEC_SRC),$(wildcard $(SRC_DIR_VEC)/*.c))
-COMMON_VEC_OBJ    := $(patsubst $(SRC_DIR_VEC)/%.c,$(BUILD_DIR_VEC)/%.o,$(COMMON_VEC_SRC))
-
 VEC_CFLAGS := $(CFLAGS) $(VEC) $(VEC_INFO)
-
-# Compile any vectorized .c (shared or versioned) with the VEC flags.
-$(BUILD_DIR_VEC)/%.o: $(SRC_DIR_VEC)/%.c | $(BUILD_DIR_VEC)
-	$(CC) $(CPPFLAGS) $(VEC_CFLAGS) -MMD -MP -c $< -o $@
-
-$(BUILD_DIR_VEC) $(BIN_DIR_VEC):
-	mkdir -p $@
 
 # Build every version.
 .PHONY: vec
 vec: $(foreach V,$(VERSIONS),$(BIN_DIR_VEC)/icp_vectorized_$(V))
 
-# Generate per-version link + phony rules: link common objs + the one kd-tree obj.
+$(BIN_DIR_VEC):
+	mkdir -p $@
+
+# Per-version: discover that folder's sources, compile into its own object dir,
+# then link them into the version binary.
 define VEC_RULE
-$(BIN_DIR_VEC)/icp_vectorized_$(1): $$(COMMON_VEC_OBJ) $$(BUILD_DIR_VEC)/kdtreeV_$(1).o | $$(BIN_DIR_VEC)
-	$$(CC) $$(VEC_CFLAGS) $$^ $$(LDLIBS) -o $$@
+SRCS_$(1) := $$(wildcard $$(SRC_DIR_VEC)/$(1)/*.c)
+OBJS_$(1) := $$(patsubst $$(SRC_DIR_VEC)/$(1)/%.c,$$(BUILD_DIR_VEC)/$(1)/%.o,$$(SRCS_$(1)))
+
+$$(BUILD_DIR_VEC)/$(1):
+	mkdir -p $$@
+
+$$(BUILD_DIR_VEC)/$(1)/%.o: $$(SRC_DIR_VEC)/$(1)/%.c | $$(BUILD_DIR_VEC)/$(1)
+	$$(CC) $$(CPPFLAGS) $$(VEC_CFLAGS) -MMD -MP -c $$< -o $$@
+
+$$(BIN_DIR_VEC)/icp_vectorized_$(1): $$(OBJS_$(1)) | $$(BIN_DIR_VEC)
+	$$(CC) $$(VEC_CFLAGS) $$(OBJS_$(1)) $$(LDLIBS) -o $$@
 
 .PHONY: vec_$(1)
-vec_$(1): $(BIN_DIR_VEC)/icp_vectorized_$(1)
+vec_$(1): $$(BIN_DIR_VEC)/icp_vectorized_$(1)
 
 .PHONY: run_vec_$(1)
-run_vec_$(1): $(BIN_DIR_VEC)/icp_vectorized_$(1)
+run_vec_$(1): $$(BIN_DIR_VEC)/icp_vectorized_$(1)
 	./$$<
 endef
 $(foreach V,$(VERSIONS),$(eval $(call VEC_RULE,$(V))))
@@ -177,5 +181,5 @@ clean:
 # Auto-generated header dependencies.
 -include $(OBJECTS:.o=.d)
 -include $(OBJECTS_BASE:.o=.d)
--include $(wildcard $(BUILD_DIR_VEC)/*.d)
+-include $(wildcard $(BUILD_DIR_VEC)/*/*.d)
 -include $(wildcard $(BUILD_DIR_OMP)/*.d)

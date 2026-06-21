@@ -6,7 +6,7 @@
 #define _POSIX_C_SOURCE 199309L
 
 #include "icp.h"
-#include "kdtree.h"
+#include "kdtreeV.h"
 #include "linalg.h"
 
 #include <stdlib.h>
@@ -32,7 +32,7 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 	PointCloud cur;
 	pc_copy(src, &cur);          /* working cloud, transformed in place */
 
-	KDTree tree;
+	KDTreeV tree;
 	if (prm->use_kdtree) kd_build(&tree, tgt);
 
 	double Rtot[9], Ttot[3];
@@ -51,19 +51,23 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 
 		/* --- 1+2. nearest neighbour + rejection ------------------------- */
 		double t0 = now_sec();
-		for (int i = 0; i + KD_W <= cur.n; i+=KD_W) {
+		for (int i = 0; i < cur.n; i += KD_W) {
+			/* Last batch clamps its start back so the tail (cur.n % KD_W)
+			 * is covered; the overlap just recomputes identical results.
+			 * Assumes cur.n >= KD_W (true for all benchmark sizes). */
+			int base = (i + KD_W <= cur.n) ? i : (cur.n - KD_W);
 			vi bi;
 			vf bd2;
-			vf qx = *(const vf_u*)(cur.x+i);
-			vf qy = *(const vf_u*)(cur.y+i);
-			vf qz = *(const vf_u*)(cur.z+i);
+			vf qx = *(const vf_u*)(cur.x+base);
+			vf qy = *(const vf_u*)(cur.y+base);
+			vf qz = *(const vf_u*)(cur.z+base);
 			if (prm->use_kdtree)
-				kd_nearest(&tree, qx, qy, qz, &bi, &bd2);
+				kd_nearest_simd(&tree, qx, qy, qz, &bi, &bd2);
 			else
-				bf_nearest(tgt, qx, qy, qz, &bi, &bd2);
+				bf_nearest_simd(tgt, qx, qy, qz, &bi, &bd2);
 			for (int k = 0; k < KD_W; k++)
 			{
-				match[i+k] = (bd2[k] <= max_d2) ? bi[k] : -1;
+				match[base+k] = (bd2[k] <= max_d2) ? bi[k] : -1;
 			}
 		}
 		res->t_nn += now_sec() - t0;

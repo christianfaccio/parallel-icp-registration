@@ -155,45 +155,56 @@ void kd_free(KDTreeV *t)
 	t->root = -1;
 }
 
+/* Portable horizontal reductions over a vf. GCC has no __builtin_reduce_*
+ * (those are Clang-only), and these tiny loops vectorize/unroll fine. */
+static inline float vmin(vf v)
+{
+	float m = v[0];
+	for (int k = 1; k < KD_W; k++) if (v[k] < m) m = v[k];
+	return m;
+}
+static inline int any_negative(vf v)
+{
+	for (int k = 0; k < KD_W; k++) if (v[k] < 0.0f) return 1;
+	return 0;
+}
+
 static void nn_search_simd(const KDTreeV *t, vf qx, vf qy, vf qz,
                    vi *best_idx, vf *best_d2)
 {
-	int stack[64];	
+	int stack[64];
 	vf bound[64];
 	int sp = 0;
-	stack[sp] = t->root; bound[sp] = 0.0f; sp++;
-	
-	vf bd = *best_d2;
-	bi bi = *best_idx;
+	stack[sp] = t->root; bound[sp] = (vf){0}; sp++;
 
-	while (sp > 0) 
+	vf bd = *best_d2;
+	vi bi = *best_idx;
+
+	while (sp > 0)
 	{
 		sp--;
-		if (__builtin_reduce_min(bound[sp] - bd) >= 0.0f) continue;	/* skip only if NO lane can beat 
-										   its plane bound */
+		/* skip only if NO lane can beat its plane bound */
+		if (vmin(bound[sp] - bd) >= 0.0f) continue;
 		const KDNodeV *nd = &t->nodes[stack[sp]];
 
-		/* leaf */
+		/* leaf: scalar loop over bucket points, SIMD across queries */
 		if (nd->count >= 0)
 		{
 			for (int p = 0; p < nd->count; p++)
 			{
-				float xs = nd->xs[p];
-				float ys = nd->ys[p];
-				float zs = nd->zs[p];
-				vf dx = xs - qx;	/* broadcast */
-				vf dy = ys - qy;
-				vf dz = zs - qz;
+				vf dx = nd->xs[p] - qx;	/* broadcast point p */
+				vf dy = nd->ys[p] - qy;
+				vf dz = nd->zs[p] - qz;
 				vf d2 = (dx * dx) + (dy * dy) + (dz * dz);
-			
+
 				vi mask = (d2 < bd);
 				vi pidx;
 				for (int k = 0; k < KD_W; k++)
 				{
 					pidx[k] = nd->idx[p];
 				}
-				bi = (mask & ib) | (~mask & bi);
-				bd  = (vf)((mask & (vi)d2) | (~mask & (vi)bd);
+				bi = (mask & pidx) | (~mask & bi);
+				bd = (vf)((mask & (vi)d2) | (~mask & (vi)bd));
 			}
 			continue;
 		}
@@ -203,14 +214,14 @@ static void nn_search_simd(const KDTreeV *t, vf qx, vf qy, vf qz,
 		vf q    = (ax == 0) ? qx : (ax == 1) ? qy : qz;
 		vf diff = q - nd->split;
 		vf pd2 = diff*diff;	/* per-lane plane distance squared */
-		
-		/* if ANY wants to go left, we go left */
-		int goleft = __builtin_reduce_or((diff < (vf){0})) != 0;
+
+		/* shared near/far order: go where any lane wants to go */
+		int goleft = any_negative(diff);
 		int near = goleft ? nd->left  : nd->right;
 		int far  = goleft ? nd->right : nd->left;
-		
-		stack[sp] = far; 
-		bound[sp] = pd2; 
+
+		stack[sp] = far;
+		bound[sp] = pd2;
 		sp++;
 		stack[sp] = near;
 		bound[sp] = (vf){0};
@@ -223,10 +234,10 @@ static void nn_search_simd(const KDTreeV *t, vf qx, vf qy, vf qz,
 void kd_nearest_simd(const KDTreeV *t, vf qx, vf qy, vf qz,
                 vi *best_idx, vf *best_d2)
 {
-	for (int i = 0; i < KD_W; i++)
+	for (int k = 0; k < KD_W; k++)
 	{
-		*best_idx[i] = -1;
-		*best_d2[i]  = FLT_MAX;
+		(*best_idx)[k] = -1;
+		(*best_d2)[k]  = FLT_MAX;
 	}
 	nn_search_simd(t, qx, qy, qz, best_idx, best_d2);
 }
