@@ -29,7 +29,8 @@ static double now_sec(void)
 int icp_run(const PointCloud *src, const PointCloud *tgt,
             const ICPParams *prm, ICPResult *res)
 {
-	PointCloud cur = pc_morton_order(&src);	// copied and ordered
+	PointCloud cur;
+	pc_morton_order(src, &cur);   /* working cloud: deep copy of src, Morton-ordered */
 
 	KDTreeV tree;
 	if (prm->use_kdtree) kd_build(&tree, tgt);

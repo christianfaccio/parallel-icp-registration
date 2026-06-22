@@ -1,4 +1,8 @@
+#ifndef ICP_UTILS_H_
+#define ICP_UTILS_H_
+
 #include <stdlib.h>
+#include <stdint.h>
 
 typedef struct
 {
@@ -19,14 +23,19 @@ static inline uint64_t spread3(uint32_t v) {	// v uses only low 21 bits
 
 static inline uint32_t quantize(float x, float min, float max)
 {
-	float t = (x - min) / (max - min);		// normalize to [0, 1]
-	uint32_t q = (uint32_t)(t * 2097152.0f);	// 2^21 = 2097152
-	return q;
+	float range = max - min;
+	if (range <= 0.0f) return 0;			// degenerate axis
+	float t = (x - min) / range;			// normalize to [0, 1]
+	if (t < 0.0f) t = 0.0f;
+	if (t > 1.0f) t = 1.0f;
+	return (uint32_t)(t * 2097151.0f);		// 2^21 - 1, stays in 21 bits
 }
 
-static int cmp_morton(const void *a, const void *b)
+static inline int cmp_morton(const void *a, const void *b)
 {
 	uint64_t ca = ((const MortonKey*)a)->code;
-	uint64_t cb = ((const MortonKey*)a)->code;
+	uint64_t cb = ((const MortonKey*)b)->code;
 	return (ca > cb) - (ca < cb);
 }
+
+#endif /* ICP_UTILS_H_ */

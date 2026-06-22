@@ -22,6 +22,10 @@ void pc_reserve(PointCloud *c, int n);
 void pc_push(PointCloud *c, float x, float y, float z);
 void pc_copy(const PointCloud *src, PointCloud *dst);   /* deep copy */
 
+/* Deep copy of `src` into `dst` with points reordered along a Morton (Z-order)
+ * curve, so consecutive points are spatial neighbours (SIMD-batch locality). */
+void pc_morton_order(const PointCloud *src, PointCloud *dst);
+
 /* Axis-aligned bounding box of the cloud. */
 void pc_bounds(const PointCloud *c, double bmin[3], double bmax[3]);
 

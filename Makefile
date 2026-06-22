@@ -8,10 +8,11 @@
 #   make asan       AddressSanitizer + UBSan
 #
 # Vectorized (versioned kd-tree backends):
-#   make vec        build ALL versions (v0, v1, v2)
+#   make vec        build ALL versions (v0, v1, v2, v3)
 #   make vec_v0     build only bin/vectorized/icp_vectorized_v0  (leaf-SIMD baseline)
 #   make vec_v1     build only ..._v1                            (flattened + iterative)
 #   make vec_v2     build only ..._v2                            (parallel queries)
+#   make vec_v3     build only ..._v3                            (parallel queries + Morton order)
 #   make run_vec_v1 build then run a specific version
 #
 #   Each src/vectorized/<ver>/ is a self-contained source set (its own icp.c,
@@ -69,7 +70,7 @@ SRC_DIR_VEC   := src/vectorized
 BUILD_DIR_VEC := build/vectorized
 BIN_DIR_VEC   := bin/vectorized
 
-VERSIONS := v0 v1 v2
+VERSIONS := v0 v1 v2 v3
 
 VEC_CFLAGS := $(CFLAGS) $(VEC) $(VEC_INFO)
 

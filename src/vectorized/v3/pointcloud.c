@@ -184,49 +184,53 @@ void pc_save_pcd(const PointCloud *c, const char *path, int stride)
 	fclose(f);
 }
 
-void pc_morton_order(PointCloud *c)
+/*
+ * Deep-copy `src` into `dst`, reordering the points along a Morton (Z-order)
+ * curve so that points close in 3D end up close in memory. Batching KD_W
+ * consecutive queries then yields spatially coherent SIMD lanes, which revives
+ * the kd-tree pruning that scattered batches (v2) destroyed.
+ */
+void pc_morton_order(const PointCloud *src, PointCloud *dst)
 {
-	MortonKey keys[c->n];
-	float minx, miny, minz = 0.0;
-	float maxx, maxy, maxz = FLT_MAX;
+	pc_init(dst);
+	pc_reserve(dst, src->n);
+	dst->n = src->n;
+	if (src->n == 0) return;
 
-	for (int k = 0; k < c->n; k++)
-	{
-		float x = c->x[k];
-		float y = c->y[k];
-		float z = c->z[k];
-		if (x < minx) minx = x;
-		if (x > maxx) maxx = x;
-		if (y < miny) miny = y;
-		if (y > maxy) maxy = y;
-		if (z < minz) minz = z;
-		if (z > maxz) maxz = z;
-	}	
-
-	for (int i = 0; i < c->n; i++)
-	{
-		float x = c->x[i];
-		float y = c->y[i];
-		float z = c->z[i];
-		uint32_t qx = quantize(x, minx, maxx);	// returns 4 bytes integers
-		uint32_t qy = quantize(y, miny, maxy);
-		uint32_t qz = quantize(z, minz, maxz);
-		keys[i].code = spread3(qx) | spread3(qy << 1) | spread3(qz << 2);
-		keys[i].idx = i;
+	/* axis-aligned bounding box (running min starts high, max starts low) */
+	float minx = src->x[0], maxx = src->x[0];
+	float miny = src->y[0], maxy = src->y[0];
+	float minz = src->z[0], maxz = src->z[0];
+	for (int i = 1; i < src->n; i++) {
+		if (src->x[i] < minx) minx = src->x[i];
+		if (src->x[i] > maxx) maxx = src->x[i];
+		if (src->y[i] < miny) miny = src->y[i];
+		if (src->y[i] > maxy) maxy = src->y[i];
+		if (src->z[i] < minz) minz = src->z[i];
+		if (src->z[i] > maxz) maxz = src->z[i];
 	}
-	
-	//ordering
-	qsort(&keys, c->n, sizeof *keys, cmp_morton);
 
-	PointCloud copy;
-	copy.n = c->n;
-	copy.cap = c->cap;
-	for (int j = 0; j < copy->n; j++)
-	{
-		copy->x[j] = c->x[keys.idx[j]];
-		copy->y[j] = c->y[keys.idx[j]];
-		copy->z[j] = c->z[keys.idx[j]];
+	MortonKey *keys = malloc((size_t)src->n * sizeof *keys);
+	if (!keys) { perror("pc_morton_order"); exit(1); }
+
+	for (int i = 0; i < src->n; i++) {
+		uint32_t qx = quantize(src->x[i], minx, maxx);
+		uint32_t qy = quantize(src->y[i], miny, maxy);
+		uint32_t qz = quantize(src->z[i], minz, maxz);
+		/* spread each coord, THEN shift into its interleave slot */
+		keys[i].code = spread3(qx) | (spread3(qy) << 1) | (spread3(qz) << 2);
+		keys[i].idx  = i;
 	}
-	return copy;
+
+	qsort(keys, (size_t)src->n, sizeof *keys, cmp_morton);
+
+	for (int j = 0; j < src->n; j++) {
+		int p = keys[j].idx;
+		dst->x[j] = src->x[p];
+		dst->y[j] = src->y[p];
+		dst->z[j] = src->z[p];
+	}
+
+	free(keys);
 }
 
