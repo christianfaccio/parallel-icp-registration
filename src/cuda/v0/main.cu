@@ -18,7 +18,9 @@
  * source_aligned.pcd for tools/render_pcd.py.
  */
 
-#define _POSIX_C_SOURCE 199309L
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 199309L   /* clock_gettime; nvcc already sets 200809L */
+#endif
 
 #include "pointcloud.h"
 #include "linalg.h"

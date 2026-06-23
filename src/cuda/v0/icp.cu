@@ -3,7 +3,9 @@
  * self-contained pass so the parallel backends can replace one at a time.
  */
 
-#define _POSIX_C_SOURCE 199309L
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 199309L   /* clock_gettime; nvcc already sets 200809L */
+#endif
 
 #include "icp.h"
 #include "kdtreeV.h"
