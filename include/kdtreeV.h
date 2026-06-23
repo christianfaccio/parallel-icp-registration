@@ -54,6 +54,7 @@ typedef struct {
 	int    *perm;            /* working index permutation (owned) */
 	KDNodeV *nodes;           /* node pool (owned) */
 	int     n;
+	int     n_nodes;         /* number of valid entries in `nodes` */
 	int     root;            /* root node index, or -1 if empty */
 } KDTreeV;
 

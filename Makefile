@@ -22,6 +22,13 @@
 #   make omp        build bin/openmp/icp_openmp (vectorized leaf + -fopenmp)
 #   make run_omp    build then run it (set OMP_NUM_THREADS to pick thread count)
 #
+# CUDA (versioned GPU backends, folder-per-version like vectorized):
+#   make cuda       build ALL versions found under src/cuda/v*  (needs nvcc)
+#   make cuda_v0    build only bin/cuda/icp_cuda_v0
+#   make run_cuda_v0 build then run it
+#   Override the GPU arch with CUDA_ARCH (default sm_80, the Leonardo A100s):
+#       make cuda CUDA_ARCH=sm_75
+#
 #   make clean      remove all build artifacts
 
 # ---- Toolchain & flags -------------------------------------------------------
@@ -136,6 +143,51 @@ $(BUILD_DIR_OMP) $(BIN_DIR_OMP):
 run_omp: $(TARGET_OMP)
 	./$(TARGET_OMP)
 
+# ---- CUDA: versioned GPU backends (folder-per-version) ----------------------
+# Mirrors the vectorized layout: each src/cuda/<ver>/ is a self-contained set of
+# .cu translation units (its own icp.cu, kdtree.cu, main.cu, ...), compiled with
+# nvcc into bin/cuda/icp_cuda_<ver>, objects kept apart in build/cuda/<ver>/.
+# Versions are discovered automatically, so new src/cuda/v* folders need no edit.
+
+NVCC          := nvcc
+CUDA_ARCH     ?= sm_80                  # Leonardo BOOSTER = A100 (sm_80); override on the CLI
+NVCC_FLAGS    := -O3 -arch=$(CUDA_ARCH)
+NVCC_CPPFLAGS := -Iinclude
+
+SRC_DIR_CUDA   := src/cuda
+BUILD_DIR_CUDA := build/cuda
+BIN_DIR_CUDA   := bin/cuda
+
+CUDA_VERSIONS := $(notdir $(wildcard $(SRC_DIR_CUDA)/v*))
+
+.PHONY: cuda
+cuda: $(foreach V,$(CUDA_VERSIONS),$(BIN_DIR_CUDA)/icp_cuda_$(V))
+
+$(BIN_DIR_CUDA):
+	mkdir -p $@
+
+define CUDA_RULE
+SRCS_CU_$(1) := $$(wildcard $$(SRC_DIR_CUDA)/$(1)/*.cu)
+OBJS_CU_$(1) := $$(patsubst $$(SRC_DIR_CUDA)/$(1)/%.cu,$$(BUILD_DIR_CUDA)/$(1)/%.o,$$(SRCS_CU_$(1)))
+
+$$(BUILD_DIR_CUDA)/$(1):
+	mkdir -p $$@
+
+$$(BUILD_DIR_CUDA)/$(1)/%.o: $$(SRC_DIR_CUDA)/$(1)/%.cu | $$(BUILD_DIR_CUDA)/$(1)
+	$$(NVCC) $$(NVCC_CPPFLAGS) $$(NVCC_FLAGS) -MMD -MP -c $$< -o $$@
+
+$$(BIN_DIR_CUDA)/icp_cuda_$(1): $$(OBJS_CU_$(1)) | $$(BIN_DIR_CUDA)
+	$$(NVCC) $$(NVCC_FLAGS) $$(OBJS_CU_$(1)) -o $$@ $$(LDLIBS)
+
+.PHONY: cuda_$(1)
+cuda_$(1): $$(BIN_DIR_CUDA)/icp_cuda_$(1)
+
+.PHONY: run_cuda_$(1)
+run_cuda_$(1): $$(BIN_DIR_CUDA)/icp_cuda_$(1)
+	./$$<
+endef
+$(foreach V,$(CUDA_VERSIONS),$(eval $(call CUDA_RULE,$(V))))
+
 # ---- Convenience -------------------------------------------------------------
 
 .PHONY: run
@@ -177,10 +229,12 @@ asan: clean $(TARGET)
 .PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR) $(BIN_DIR) $(BUILD_DIR_VEC) $(BIN_DIR_VEC) \
-	$(BUILD_DIR_OMP) $(BIN_DIR_OMP) $(BUILD_DIR_BASE) $(BIN_DIR_BASE)
+	$(BUILD_DIR_OMP) $(BIN_DIR_OMP) $(BUILD_DIR_BASE) $(BIN_DIR_BASE) \
+	$(BUILD_DIR_CUDA) $(BIN_DIR_CUDA)
 
 # Auto-generated header dependencies.
 -include $(OBJECTS:.o=.d)
 -include $(OBJECTS_BASE:.o=.d)
 -include $(wildcard $(BUILD_DIR_VEC)/*/*.d)
 -include $(wildcard $(BUILD_DIR_OMP)/*.d)
+-include $(wildcard $(BUILD_DIR_CUDA)/*/*.d)
