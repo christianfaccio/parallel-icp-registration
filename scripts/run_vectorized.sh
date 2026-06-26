@@ -32,15 +32,15 @@ set -euo pipefail
 export LC_ALL=C
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$HERE/bin/vectorized/icp_vectorized_v2"
+BIN="$HERE/bin/vectorized/icp_vectorized_v3"
 
-OUT="${1:-out/vectorized/vectorized_v2.csv}"
+OUT="${1:-out/vectorized/vectorized_v3.csv}"
 CORE="${2:-auto}"   # "auto" = pin to the first CPU in our cgroup; or an explicit id; "none" = no pin
 MAX_ITERS="${3:-50}"
 SEED="${4:-12345}"
 
 if [[ ! -x "$BIN" ]]; then
-	echo "error: $BIN not found. Build it first with: make vec_v2" >&2
+	echo "error: $BIN not found. Build it first with: make vec_v3" >&2
 	exit 1
 fi
 

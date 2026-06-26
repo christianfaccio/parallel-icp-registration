@@ -10,4 +10,4 @@
 #SBATCH -t 00:20:00
 #SBATCH -o serial_%j.out -e serial_%j.err
 
-bash scripts/run_vectorized.sh vectorized.csv none 50 12345
+bash scripts/run_vectorized.sh vectorized_v3.csv none 50 12345

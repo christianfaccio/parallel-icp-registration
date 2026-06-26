@@ -13,9 +13,4 @@
 # Which versioned GPU backend to build and sweep (v0, v1, ...).
 VERSION="${VERSION:-v0}"
 
-# Leonardo BOOSTER nodes are A100 (sm_80). Load the toolchain, build, then sweep.
-module load cuda
-
-make cuda_"$VERSION" CUDA_ARCH=sm_80
-
 bash scripts/run_cuda.sh "out/cuda/cuda_$VERSION.csv" "$VERSION" 50 12345

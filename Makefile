@@ -153,6 +153,7 @@ NVCC          := nvcc
 CUDA_ARCH     ?= sm_80                  # Leonardo BOOSTER = A100 (sm_80); override on the CLI
 NVCC_FLAGS    := -O3 -arch=$(CUDA_ARCH)
 NVCC_CPPFLAGS := -Iinclude
+PROF_FLAGS    := -lineinfo
 
 SRC_DIR_CUDA   := src/cuda
 BUILD_DIR_CUDA := build/cuda
@@ -174,10 +175,10 @@ $$(BUILD_DIR_CUDA)/$(1):
 	mkdir -p $$@
 
 $$(BUILD_DIR_CUDA)/$(1)/%.o: $$(SRC_DIR_CUDA)/$(1)/%.cu | $$(BUILD_DIR_CUDA)/$(1)
-	$$(NVCC) $$(NVCC_CPPFLAGS) $$(NVCC_FLAGS) -MMD -MP -c $$< -o $$@
+	$$(NVCC) $$(NVCC_CPPFLAGS) $$(NVCC_FLAGS) $$(PROF_FLAGS) -MMD -MP -c $$< -o $$@
 
 $$(BIN_DIR_CUDA)/icp_cuda_$(1): $$(OBJS_CU_$(1)) | $$(BIN_DIR_CUDA)
-	$$(NVCC) $$(NVCC_FLAGS) $$(OBJS_CU_$(1)) -o $$@ $$(LDLIBS)
+	$$(NVCC) $$(NVCC_FLAGS) $$(PROF_FLAGS) $$(OBJS_CU_$(1)) -o $$@ $$(LDLIBS)
 
 .PHONY: cuda_$(1)
 cuda_$(1): $$(BIN_DIR_CUDA)/icp_cuda_$(1)
