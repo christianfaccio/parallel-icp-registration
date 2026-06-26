@@ -51,6 +51,12 @@ void pc_make_source(const PointCloud *tgt, PointCloud *src,
 /* In-place rigid transform: p <- R*p + T for every point. (SIMD kernel.) */
 void pc_apply_transform(PointCloud *c, const double R[9], const double T[3]);
 
+#ifdef __CUDACC__
+/* Device version: in-place rigid transform over SoA arrays, one thread/point. */
+__global__ void pc_transform_kernel(float *xs, float *ys, float *zs,
+                                    int n, const double *R, const double *T);
+#endif
+
 /* Write an ASCII .pcd file (same format the sibling project / tools expect). */
 void pc_save_pcd(const PointCloud *c, const char *path, int stride);
 

@@ -165,15 +165,19 @@ void pc_apply_transform(PointCloud *c, const double R[9], const double T[3])
 	}
 }
 
-__global__ void pc_apply_transform(const float *xs, const float *ys, const float *zs, 
-		const int n, const double R[9], const double T[3])
+/* In-place rigid transform on the device: p <- R*p + T, one thread per point.
+ * No atomics: each thread owns one index, and reads x,y,z into registers before
+ * writing so the in-place update is safe. */
+__global__ void pc_transform_kernel(float *xs, float *ys, float *zs,
+		int n, const double *R, const double *T)
 {
 	int idx = threadIdx.x + blockIdx.x * blockDim.x;
 	if (idx >= n) return;
 
-	atomicAdd(&xs, (float)(R[0]*xs[idx] + R[1]*ys[idx] + R[2]*zs[idx]));
-	atomicAdd(&ys, (float)(R[3]*xs[idx] + R[4]*ys[idx] + R[5]*zs[idx]));
-	atomicAdd(&zs, (float)(R[6]*xs[idx] + R[7]*ys[idx] + R[8]*zs[idx]));
+	double x = xs[idx], y = ys[idx], z = zs[idx];
+	xs[idx] = (float)(R[0]*x + R[1]*y + R[2]*z + T[0]);
+	ys[idx] = (float)(R[3]*x + R[4]*y + R[5]*z + T[1]);
+	zs[idx] = (float)(R[6]*x + R[7]*y + R[8]*z + T[2]);
 }
 
 void pc_save_pcd(const PointCloud *c, const char *path, int stride)
