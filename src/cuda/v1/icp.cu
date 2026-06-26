@@ -40,6 +40,38 @@
 		}                                                             \
 	} while (0)
 
+/* --- block-level sum reduction helpers -----------------------------------
+ * Two levels: each warp reduces its 32 lanes with shuffles, the per-warp
+ * partials are combined through a small shared buffer, and only thread 0 of
+ * the block touches global memory (one atomicAdd per quantity per block).
+ * This replaces ~one atomic per thread with ~one atomic per block.
+ *
+ * IMPORTANT: every thread in the block must call these (no early return before
+ * them), so the warp shuffles see all 32 lanes. Threads past `n` contribute 0.
+ */
+__device__ __forceinline__ double warp_reduce_sum(double v)
+{
+	#pragma unroll
+	for (int off = 16; off > 0; off >>= 1)
+		v += __shfl_down_sync(0xffffffffu, v, off);
+	return v;   /* full sum lands in lane 0 */
+}
+
+/* Block sum of `v`; result valid in thread 0. `scratch` needs >= 32 doubles.
+ * Caller must __syncthreads() between successive calls that reuse `scratch`. */
+__device__ __forceinline__ double block_reduce_sum(double v, double *scratch)
+{
+	int lane = threadIdx.x & 31;
+	int wid  = threadIdx.x >> 5;
+	v = warp_reduce_sum(v);
+	if (lane == 0) scratch[wid] = v;          /* one partial per warp */
+	__syncthreads();
+	int nwarps = (blockDim.x + 31) >> 5;
+	v = (threadIdx.x < nwarps) ? scratch[lane] : 0.0;
+	if (wid == 0) v = warp_reduce_sum(v);     /* warp 0 combines the partials */
+	return v;
+}
+
 /* --- correspondence rejection: match[i] = tgt idx, or -1 if too far ------- */
 __global__ void compute_match(int *match, const float *bd2, const int *bi,
                               float max_d2, int n)
@@ -56,16 +88,26 @@ __global__ void compute_centroids(const float *xs, const float *ys, const float 
                                   double *cs, double *ct, int *m)
 {
 	int idx = threadIdx.x + blockIdx.x * blockDim.x;
-	if (idx >= n) return;
-	double mask = (double)(match[idx] >= 0);
-	int j = (match[idx] >= 0) ? match[idx] : 0;
-	atomicAdd(&cs[0], xs[idx] * mask);
-	atomicAdd(&cs[1], ys[idx] * mask);
-	atomicAdd(&cs[2], zs[idx] * mask);
-	atomicAdd(&ct[0], xt[j] * mask);
-	atomicAdd(&ct[1], yt[j] * mask);
-	atomicAdd(&ct[2], zt[j] * mask);
-	atomicAdd(m, (int)mask);
+
+	/* per-thread partials (0 for out-of-range threads -- they still reduce) */
+	double c0 = 0, c1 = 0, c2 = 0, t0 = 0, t1 = 0, t2 = 0, cnt = 0;
+	if (idx < n) {
+		double mask = (double)(match[idx] >= 0);
+		int j = (match[idx] >= 0) ? match[idx] : 0;
+		c0 = xs[idx] * mask; c1 = ys[idx] * mask; c2 = zs[idx] * mask;
+		t0 = xt[j]   * mask; t1 = yt[j]   * mask; t2 = zt[j]   * mask;
+		cnt = mask;
+	}
+
+	__shared__ double scr[32];
+	double r;
+	r = block_reduce_sum(c0,  scr); if (threadIdx.x == 0) atomicAdd(&cs[0], r); __syncthreads();
+	r = block_reduce_sum(c1,  scr); if (threadIdx.x == 0) atomicAdd(&cs[1], r); __syncthreads();
+	r = block_reduce_sum(c2,  scr); if (threadIdx.x == 0) atomicAdd(&cs[2], r); __syncthreads();
+	r = block_reduce_sum(t0,  scr); if (threadIdx.x == 0) atomicAdd(&ct[0], r); __syncthreads();
+	r = block_reduce_sum(t1,  scr); if (threadIdx.x == 0) atomicAdd(&ct[1], r); __syncthreads();
+	r = block_reduce_sum(t2,  scr); if (threadIdx.x == 0) atomicAdd(&ct[2], r); __syncthreads();
+	r = block_reduce_sum(cnt, scr); if (threadIdx.x == 0) atomicAdd(m, (int)r);
 }
 
 /* --- stage 3b: turn the centroid sums into means (3 threads) -------------- */
@@ -85,24 +127,35 @@ __global__ void compute_cc(const float *xs, const float *ys, const float *zs,
                            double *H, double *sse)
 {
 	int idx = threadIdx.x + blockIdx.x * blockDim.x;
-	if (idx >= n) return;
-	double mask = (double)(match[idx] >= 0);
-	int j = (match[idx] >= 0) ? match[idx] : 0;
-	double sx = xs[idx] - cs[0], sy = ys[idx] - cs[1], sz = zs[idx] - cs[2];
-	double tx = xt[j]   - ct[0], ty = yt[j]   - ct[1], tz = zt[j]   - ct[2];
-	atomicAdd(&H[0], sx*tx*mask);
-	atomicAdd(&H[1], sx*ty*mask);
-	atomicAdd(&H[2], sx*tz*mask);
-	atomicAdd(&H[3], sy*tx*mask);
-	atomicAdd(&H[4], sy*ty*mask);
-	atomicAdd(&H[5], sy*tz*mask);
-	atomicAdd(&H[6], sz*tx*mask);
-	atomicAdd(&H[7], sz*ty*mask);
-	atomicAdd(&H[8], sz*tz*mask);
-	double ex = xs[idx] - xt[j];
-	double ey = ys[idx] - yt[j];
-	double ez = zs[idx] - zt[j];
-	atomicAdd(sse, (ex*ex + ey*ey + ez*ez) * mask);   /* residual at start of iter */
+
+	/* per-thread partials (0 for out-of-range threads -- they still reduce) */
+	double h0=0,h1=0,h2=0,h3=0,h4=0,h5=0,h6=0,h7=0,h8=0,e2=0;
+	if (idx < n) {
+		double mask = (double)(match[idx] >= 0);
+		int j = (match[idx] >= 0) ? match[idx] : 0;
+		double sx = xs[idx] - cs[0], sy = ys[idx] - cs[1], sz = zs[idx] - cs[2];
+		double tx = xt[j]   - ct[0], ty = yt[j]   - ct[1], tz = zt[j]   - ct[2];
+		h0 = sx*tx*mask; h1 = sx*ty*mask; h2 = sx*tz*mask;
+		h3 = sy*tx*mask; h4 = sy*ty*mask; h5 = sy*tz*mask;
+		h6 = sz*tx*mask; h7 = sz*ty*mask; h8 = sz*tz*mask;
+		double ex = xs[idx] - xt[j];
+		double ey = ys[idx] - yt[j];
+		double ez = zs[idx] - zt[j];
+		e2 = (ex*ex + ey*ey + ez*ez) * mask;   /* residual at start of iter */
+	}
+
+	__shared__ double scr[32];
+	double r;
+	r = block_reduce_sum(h0, scr); if (threadIdx.x == 0) atomicAdd(&H[0], r); __syncthreads();
+	r = block_reduce_sum(h1, scr); if (threadIdx.x == 0) atomicAdd(&H[1], r); __syncthreads();
+	r = block_reduce_sum(h2, scr); if (threadIdx.x == 0) atomicAdd(&H[2], r); __syncthreads();
+	r = block_reduce_sum(h3, scr); if (threadIdx.x == 0) atomicAdd(&H[3], r); __syncthreads();
+	r = block_reduce_sum(h4, scr); if (threadIdx.x == 0) atomicAdd(&H[4], r); __syncthreads();
+	r = block_reduce_sum(h5, scr); if (threadIdx.x == 0) atomicAdd(&H[5], r); __syncthreads();
+	r = block_reduce_sum(h6, scr); if (threadIdx.x == 0) atomicAdd(&H[6], r); __syncthreads();
+	r = block_reduce_sum(h7, scr); if (threadIdx.x == 0) atomicAdd(&H[7], r); __syncthreads();
+	r = block_reduce_sum(h8, scr); if (threadIdx.x == 0) atomicAdd(&H[8], r); __syncthreads();
+	r = block_reduce_sum(e2, scr); if (threadIdx.x == 0) atomicAdd(sse, r);
 }
 
 static double now_sec(void)
