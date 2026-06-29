@@ -2,6 +2,7 @@
 build/
 bin/
 docs/
+tools/
 
 # runtime outputs (PCD dumps + renders)
 *.pcd

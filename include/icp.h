@@ -27,6 +27,9 @@ typedef struct {
 	int    iters;           /* iterations actually run */
 	double final_rmse;      /* RMSE of accepted correspondences at convergence */
 	long   final_pairs;     /* number of accepted correspondences in last iter */
+	double t_setup;         /* one-time: host tree build + Morton reorder      */
+	double t_ctx;           /* one-time: CUDA context init (0 on CPU backends) */
+	double t_upload;        /* one-time: device alloc + H2D upload (0 on CPU)  */
 	double t_nn;            /* cumulative seconds: NN search          */
 	double t_solve;         /* cumulative seconds: reduction + SVD     */
 	double t_transform;     /* cumulative seconds: apply transform     */
