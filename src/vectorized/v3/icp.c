@@ -29,11 +29,15 @@ static double now_sec(void)
 int icp_run(const PointCloud *src, const PointCloud *tgt,
             const ICPParams *prm, ICPResult *res)
 {
+	double ts0 = now_sec();
 	PointCloud cur;
 	pc_morton_order(src, &cur);   /* working cloud: deep copy of src, Morton-ordered */
 
 	KDTreeV tree;
 	if (prm->use_kdtree) kd_build(&tree, tgt);
+	res->t_setup  = now_sec() - ts0;   /* one-time host build + Morton reorder */
+	res->t_ctx    = 0.0;               /* no GPU context on CPU backends */
+	res->t_upload = 0.0;
 
 	double Rtot[9], Ttot[3];
 	mat3_identity(Rtot);

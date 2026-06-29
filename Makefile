@@ -26,6 +26,8 @@
 #   make cuda       build ALL versions found under src/cuda/v*  (needs nvcc)
 #   make cuda_v0    build only bin/cuda/icp_cuda_v0
 #   make run_cuda_v0 build then run it
+#   make nsys_v0    build then profile with Nsight Systems -> out/cuda/report_v0.*
+#                   pass run args via NSYS_ARGS, e.g. make nsys_v1 NSYS_ARGS="500000"
 #   Override the GPU arch with CUDA_ARCH (default sm_80, the Leonardo A100s):
 #       make cuda CUDA_ARCH=sm_75
 #
@@ -154,7 +156,8 @@ NSYS	      := nsys
 CUDA_ARCH     ?= sm_80                  # Leonardo BOOSTER = A100 (sm_80); override on the CLI
 NVCC_FLAGS    := -O3 -arch=$(CUDA_ARCH) -lineinfo
 NVCC_CPPFLAGS := -Iinclude
-PROF_FLAGS    := profile -t cuda,nvtx,mpi,openacc --stats=true --force-overwrite true
+PROF_FLAGS    := profile -t cuda,nvtx --stats=true --force-overwrite true
+NSYS_ARGS     ?=                        # program args for the profiled run, e.g. NSYS_ARGS="500000"
 
 SRC_DIR_CUDA   := src/cuda
 BUILD_DIR_CUDA := build/cuda
@@ -166,7 +169,7 @@ CUDA_VERSIONS := $(notdir $(wildcard $(SRC_DIR_CUDA)/v*))
 .PHONY: cuda
 cuda: $(foreach V,$(CUDA_VERSIONS),$(BIN_DIR_CUDA)/icp_cuda_$(V))
 
-$(BIN_DIR_CUDA):
+$(BIN_DIR_CUDA) $(OUT_DIR_CUDA):
 	mkdir -p $@
 
 define CUDA_RULE
@@ -189,9 +192,10 @@ cuda_$(1): $$(BIN_DIR_CUDA)/icp_cuda_$(1)
 run_cuda_$(1): $$(BIN_DIR_CUDA)/icp_cuda_$(1)
 	./$$<
 
-.PHONY: cuda_$(1)_nsys
-$$(OUT_DIR/CUDA)/cuda_$(1)_nsys: $$(OBJS_CU_$(1))
-	$$(NSYS) $$(PROF_FLAGS) $$(OBJS_CU_$(1)) -o $$@
+.PHONY: nsys_$(1)
+nsys_$(1): $$(BIN_DIR_CUDA)/icp_cuda_$(1) | $$(OUT_DIR_CUDA)
+	$$(NSYS) $$(PROF_FLAGS) -o $$(OUT_DIR_CUDA)/report_$(1) \
+		$$(BIN_DIR_CUDA)/icp_cuda_$(1) $$(NSYS_ARGS)
 endef
 $(foreach V,$(CUDA_VERSIONS),$(eval $(call CUDA_RULE,$(V))))
 
@@ -237,7 +241,7 @@ asan: clean $(TARGET)
 clean:
 	rm -rf $(BUILD_DIR) $(BIN_DIR) $(BUILD_DIR_VEC) $(BIN_DIR_VEC) \
 	$(BUILD_DIR_OMP) $(BIN_DIR_OMP) $(BUILD_DIR_BASE) $(BIN_DIR_BASE) \
-	$(BUILD_DIR_CUDA) $(BIN_DIR_CUDA)
+	$(BUILD_DIR_CUDA) $(BIN_DIR_CUDA) $(OUT_DIR_CUDA)
 
 # Auto-generated header dependencies.
 -include $(OBJECTS:.o=.d)

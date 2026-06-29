@@ -120,6 +120,14 @@ int main(int argc, char **argv)
 	printf("---- timing (s) ----\n");
 	printf("scene gen       : %8.4f\n", t_gen);
 	printf("icp total       : %8.4f\n", t_icp);
+	printf("  setup build   : %8.4f  (%.1f%%)\n", res.t_setup,
+	       100.0 * res.t_setup / (t_icp > 0 ? t_icp : 1));
+	if (res.t_ctx > 0)
+		printf("  CUDA ctx init : %8.4f  (%.1f%%)\n", res.t_ctx,
+		       100.0 * res.t_ctx / (t_icp > 0 ? t_icp : 1));
+	if (res.t_upload > 0)
+		printf("  H2D upload    : %8.4f  (%.1f%%)\n", res.t_upload,
+		       100.0 * res.t_upload / (t_icp > 0 ? t_icp : 1));
 	printf("  NN search     : %8.4f  (%.1f%%)\n", res.t_nn,
 	       100.0 * res.t_nn / (t_icp > 0 ? t_icp : 1));
 	printf("  reduce+solve  : %8.4f  (%.1f%%)\n", res.t_solve,

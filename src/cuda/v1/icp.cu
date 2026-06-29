@@ -168,16 +168,25 @@ static double now_sec(void)
 int icp_run(const PointCloud *src, const PointCloud *tgt,
             const ICPParams *prm, ICPResult *res)
 {
+	/* Force CUDA context creation up front (the first CUDA call pays for it)
+	 * so its one-time cost is measured apart from the real work. */
+	double tc0 = now_sec();
+	CUDA_CHECK(cudaFree(0));
+	res->t_ctx = now_sec() - tc0;
+
+	double ts0 = now_sec();
 	PointCloud cur;
 	pc_morton_order(src, &cur);   /* working cloud: deep copy of src, Morton-ordered */
 
 	KDTreeV tree;
 	if (prm->use_kdtree) kd_build(&tree, tgt);
+	res->t_setup = now_sec() - ts0;   /* host build + Morton reorder (one-time) */
 
 	int Ntpb = 256;
 	int Nb   = (cur.n + Ntpb - 1) / Ntpb;
 
 	/* --- device buffers: all allocated once, outside the loop ----------- */
+	double tu0 = now_sec();
 	/* working source cloud: queries AND transform target, resident on device */
 	float *d_sx, *d_sy, *d_sz;
 	CUDA_CHECK(cudaMalloc(&d_sx, (size_t)cur.n * sizeof(float)));
@@ -220,6 +229,7 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 	CUDA_CHECK(cudaMalloc(&d_sse,     sizeof(double)));
 	CUDA_CHECK(cudaMalloc(&d_R,   9 * sizeof(double)));
 	CUDA_CHECK(cudaMalloc(&d_T,   3 * sizeof(double)));
+	res->t_upload = now_sec() - tu0;   /* device alloc + H2D upload (one-time) */
 
 	double Rtot[9], Ttot[3];
 	mat3_identity(Rtot);
