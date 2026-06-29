@@ -28,6 +28,10 @@
 #   make run_cuda_v0 build then run it
 #   make nsys_v0    build then profile with Nsight Systems -> out/cuda/report_v0.*
 #                   pass run args via NSYS_ARGS, e.g. make nsys_v1 NSYS_ARGS="500000"
+#   make ncu_v0     build then per-kernel profile with Nsight Compute -> out/cuda/ncu_v0.ncu-rep
+#                   defaults to 2 launches of kd_nearest_kernel; tune with
+#                   NCU_KERNEL / NCU_LAUNCHES / NCU_SET / NCU_ARGS, e.g.
+#                   make ncu_v1 NCU_KERNEL=compute_cc NCU_ARGS="500000"
 #   Override the GPU arch with CUDA_ARCH (default sm_80, the Leonardo A100s):
 #       make cuda CUDA_ARCH=sm_75
 #
@@ -153,11 +157,22 @@ run_omp: $(TARGET_OMP)
 
 NVCC          := nvcc
 NSYS	      := nsys
+NCU           := ncu
 CUDA_ARCH     ?= sm_80                  # Leonardo BOOSTER = A100 (sm_80); override on the CLI
 NVCC_FLAGS    := -O3 -arch=$(CUDA_ARCH) -lineinfo
 NVCC_CPPFLAGS := -Iinclude
 PROF_FLAGS    := profile -t cuda,nvtx --stats=true --force-overwrite true
-NSYS_ARGS     ?=                        # program args for the profiled run, e.g. NSYS_ARGS="500000"
+NSYS_ARGS     ?=                        # program args for the nsys run, e.g. NSYS_ARGS="500000"
+
+# Nsight Compute: per-kernel deep dive. ncu REPLAYS each profiled launch many
+# times, so it is slow -- by default we cap to a few launches of the hottest
+# kernel. Override NCU_KERNEL/NCU_LAUNCHES/NCU_SET, or NCU_FLAGS wholesale.
+NCU_KERNEL    ?= kd_nearest_kernel      # regex; empty = all kernels
+NCU_LAUNCHES  ?= 2                      # how many matching launches to profile
+NCU_SET       ?= full                   # metric set: basic|detailed|full|roofline
+NCU_FLAGS     := -f --set $(NCU_SET) $(if $(NCU_KERNEL),-k $(NCU_KERNEL),) \
+                 --launch-count $(NCU_LAUNCHES)
+NCU_ARGS      ?=                        # program args for the ncu run, e.g. NCU_ARGS="500000"
 
 SRC_DIR_CUDA   := src/cuda
 BUILD_DIR_CUDA := build/cuda
@@ -196,6 +211,11 @@ run_cuda_$(1): $$(BIN_DIR_CUDA)/icp_cuda_$(1)
 nsys_$(1): $$(BIN_DIR_CUDA)/icp_cuda_$(1) | $$(OUT_DIR_CUDA)
 	$$(NSYS) $$(PROF_FLAGS) -o $$(OUT_DIR_CUDA)/report_$(1) \
 		$$(BIN_DIR_CUDA)/icp_cuda_$(1) $$(NSYS_ARGS)
+
+.PHONY: ncu_$(1)
+ncu_$(1): $$(BIN_DIR_CUDA)/icp_cuda_$(1) | $$(OUT_DIR_CUDA)
+	$$(NCU) $$(NCU_FLAGS) -o $$(OUT_DIR_CUDA)/ncu_$(1) \
+		$$(BIN_DIR_CUDA)/icp_cuda_$(1) $$(NCU_ARGS)
 endef
 $(foreach V,$(CUDA_VERSIONS),$(eval $(call CUDA_RULE,$(V))))
 
