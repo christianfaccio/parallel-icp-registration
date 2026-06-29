@@ -150,14 +150,16 @@ run_omp: $(TARGET_OMP)
 # Versions are discovered automatically, so new src/cuda/v* folders need no edit.
 
 NVCC          := nvcc
+NSYS	      := nsys
 CUDA_ARCH     ?= sm_80                  # Leonardo BOOSTER = A100 (sm_80); override on the CLI
-NVCC_FLAGS    := -O3 -arch=$(CUDA_ARCH)
+NVCC_FLAGS    := -O3 -arch=$(CUDA_ARCH) -lineinfo
 NVCC_CPPFLAGS := -Iinclude
-PROF_FLAGS    := -lineinfo
+PROF_FLAGS    := profile -t cuda,nvtx,mpi,openacc --stats=true --force-overwrite true
 
 SRC_DIR_CUDA   := src/cuda
 BUILD_DIR_CUDA := build/cuda
 BIN_DIR_CUDA   := bin/cuda
+OUT_DIR_CUDA   := out/cuda
 
 CUDA_VERSIONS := $(notdir $(wildcard $(SRC_DIR_CUDA)/v*))
 
@@ -175,10 +177,10 @@ $$(BUILD_DIR_CUDA)/$(1):
 	mkdir -p $$@
 
 $$(BUILD_DIR_CUDA)/$(1)/%.o: $$(SRC_DIR_CUDA)/$(1)/%.cu | $$(BUILD_DIR_CUDA)/$(1)
-	$$(NVCC) $$(NVCC_CPPFLAGS) $$(NVCC_FLAGS) $$(PROF_FLAGS) -MMD -MP -c $$< -o $$@
+	$$(NVCC) $$(NVCC_CPPFLAGS) $$(NVCC_FLAGS) -MMD -MP -c $$< -o $$@
 
 $$(BIN_DIR_CUDA)/icp_cuda_$(1): $$(OBJS_CU_$(1)) | $$(BIN_DIR_CUDA)
-	$$(NVCC) $$(NVCC_FLAGS) $$(PROF_FLAGS) $$(OBJS_CU_$(1)) -o $$@ $$(LDLIBS)
+	$$(NVCC) $$(NVCC_FLAGS) $$(OBJS_CU_$(1)) -o $$@ $$(LDLIBS)
 
 .PHONY: cuda_$(1)
 cuda_$(1): $$(BIN_DIR_CUDA)/icp_cuda_$(1)
@@ -186,6 +188,10 @@ cuda_$(1): $$(BIN_DIR_CUDA)/icp_cuda_$(1)
 .PHONY: run_cuda_$(1)
 run_cuda_$(1): $$(BIN_DIR_CUDA)/icp_cuda_$(1)
 	./$$<
+
+.PHONY: cuda_$(1)_nsys
+$$(OUT_DIR/CUDA)/cuda_$(1)_nsys: $$(OBJS_CU_$(1))
+	$$(NSYS) $$(PROF_FLAGS) $$(OBJS_CU_$(1)) -o $$@
 endef
 $(foreach V,$(CUDA_VERSIONS),$(eval $(call CUDA_RULE,$(V))))
 

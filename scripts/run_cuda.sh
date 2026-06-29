@@ -28,7 +28,7 @@ export LC_ALL=C
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-VERSION="${2:-v0}"
+VERSION="${2:-v1}"
 BIN="$HERE/bin/cuda/icp_cuda_$VERSION"
 
 OUT="${1:-out/cuda/cuda_$VERSION.csv}"
@@ -45,7 +45,7 @@ mkdir -p "$(dirname "$OUT")"
 # Geometric sweep. Same lower range as the CPU sweeps for comparability, plus a
 # few larger sizes where the GPU has enough work to amortize launch + transfer.
 NS=(
-	500 1000 1755 3000 6000 12000 25000 46811 80000 100000 150000 250000 500000
+	500 1000 1755 3000 6000 12000 25000 46811 80000 100000 150000 
 )
 
 echo "n,target_points,source_points,iters,t_nn_s,t_icp_s,nn_pct,ns_per_query" > "$OUT"
