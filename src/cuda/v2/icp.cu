@@ -1,18 +1,3 @@
-/*
- * icp.cu (v1) -- the point-to-point ICP loop, with the *whole* per-iteration
- * pipeline on the device. The working source cloud lives on the GPU and is
- * transformed in place each iteration, so the only host<->device traffic per
- * iteration is a handful of scalars (R,T down; H, centroids, sse, m up). The
- * 3x3 Kabsch/SVD solve stays on the host: it is 9 numbers with no parallelism,
- * and we already pay one sync per iteration for the convergence test.
- *
- * Stages per iteration:
- *   1+2. NN search + rejection   -> d_match
- *   3.   centroids + cross-cov H  -> d_cs, d_ct, d_H, d_sse   (atomic reductions)
- *   4a.  Kabsch solve (host)      -> Rs, Ts
- *   4b.  apply transform (device, in place) + accumulate (host)
- */
-
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 199309L   /* clock_gettime; nvcc already sets 200809L */
 #endif
@@ -30,14 +15,14 @@
 
 #include <cuda_runtime.h>
 
-#define CUDA_CHECK(call)                                                      \
-	do {                                                                  \
-		cudaError_t err_ = (call);                                    \
-		if (err_ != cudaSuccess) {                                    \
-			fprintf(stderr, "CUDA error %s:%d: %s\n",             \
-			        __FILE__, __LINE__, cudaGetErrorString(err_));\
-			exit(1);                                              \
-		}                                                             \
+#define CUDA_CHECK(call)                                                      
+	do {                                                                  
+		cudaError_t err_ = (call);                                    
+		if (err_ != cudaSuccess) {                                    
+			fprintf(stderr, "CUDA error %s:%d: %s\n",             
+			        __FILE__, __LINE__, cudaGetErrorString(err_));
+			exit(1);                                              
+		}                                                             
 	} while (0)
 
 /* --- block-level sum reduction helpers -----------------------------------
@@ -178,7 +163,7 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 	PointCloud cur;
 	pc_morton_order(src, &cur);   /* working cloud: deep copy of src, Morton-ordered */
 
-	KDTreeV tree;
+	KDTreeGPU tree;
 	if (prm->use_kdtree) kd_build(&tree, tgt);
 	res->t_setup = now_sec() - ts0;   /* host build + Morton reorder (one-time) */
 
@@ -214,6 +199,17 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 		                      cudaMemcpyHostToDevice));
 	}
 
+	/* leaf nodes */
+	float *d_leaf_x, *d_leaf_y, *d_leaf_z, *d_leaf_idx;
+	CUDA_CHECK(cudaMalloc(&d_leaf_x, (size_t)tree->n_nodes * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&d_leaf_y, (size_t)tree->n_nodes * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&d_leaf_z, (size_t)tree->n_nodes * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&d_leaf_idx, (size_t)tree->n_nodes * sizeof(int)));
+	CUDA_CHECK(cudaMemcpy(d_leaf_x, tree->leaf_x, (size_t)tree->n_nodes * sizeof(float), cudaMemcpyHostToDevice));
+	CUDA_CHECK(cudaMemcpy(d_leaf_y, tree->leaf_y, (size_t)tree->n_nodes * sizeof(float), cudaMemcpyHostToDevice));
+	CUDA_CHECK(cudaMemcpy(d_leaf_z, tree->leaf_z, (size_t)tree->n_nodes * sizeof(float), cudaMemcpyHostToDevice));
+	CUDA_CHECK(cudaMemcpy(d_leaf_idx, tree->leaf_idx, (size_t)tree->n_nodes * sizeof(int), cudaMemcpyHostToDevice));
+	
 	/* per-query NN results + match, and the small reduction outputs */
 	int   *d_bi;    float *d_bd2;
 	int   *d_match;
@@ -248,6 +244,7 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 		double t0 = now_sec();
 		if (prm->use_kdtree)
 			kd_nearest_kernel<<<Nb, Ntpb>>>(d_nodes, tree.root, cur.n,
+							d_leaf_x, d_leaf_y, d_leaf_z, d_leaf_idx,
 			                                d_sx, d_sy, d_sz, d_bi, d_bd2);
 		else
 			bf_nearest_kernel<<<Nb, Ntpb>>>(d_tx, d_ty, d_tz, tgt->n,

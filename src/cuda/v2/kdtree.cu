@@ -1,16 +1,4 @@
-/*
- * kdtreeV.c -- median-split 3D KD-tree with KD_W-wide leaf buckets, plus a
- * brute-force fallback. Vectorized with GCC/clang vector extensions; the width
- * KD_W (8 on AVX, 4 on NEON) is chosen in kdtreeV.h from the target arch.
- *
- * Differences with v2:
- * 	- here I use a Morton order for the points,
- * 	such that if they are close together in the 
- * 	3D space they are also close together in 
- * 	the 1D domain.
- */
-
-#include "kdtree_cuda.h"   /* pulls in kdtreeV.h: KDNodeV, KDTreeV, KD_W */
+#include "kdtree_cuda.h" 
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,8 +11,7 @@ static inline float coord(const PointCloud *p, int i, int axis)
 
 static inline void swap_int(int *a, int *b) { int t = *a; *a = *b; *b = t; }
 
-/* Lomuto partition of perm[lo..hi] (inclusive) on `axis`; pivot = perm[hi]. */
-static int partition(KDTreeV *t, int lo, int hi, int axis)
+static int partition(KDTreeGPU *t, int lo, int hi, int axis)
 {
 	float pv = coord(t->pts, t->perm[hi], axis);
 	int i = lo;
@@ -36,7 +23,7 @@ static int partition(KDTreeV *t, int lo, int hi, int axis)
 }
 
 /* Quickselect: reorder perm[lo..hi] so perm[k] holds the k-th smallest on axis. */
-static void qselect(KDTreeV *t, int lo, int hi, int k, int axis)
+static void qselect(KDTreeGPU *t, int lo, int hi, int k, int axis)
 {
 	while (lo < hi) {
 		/* mid pivot guards against the sorted-input worst case */
@@ -49,32 +36,33 @@ static void qselect(KDTreeV *t, int lo, int hi, int k, int axis)
 }
 
 /* Recursively build over perm[lo,hi); returns the node index or -1. */
-static int build_rec(KDTreeV *t, int *next, int lo, int hi, int depth)
+static int build_rec(KDTreeGPU *t, int *next, int lo, int hi, int depth)
 {
 	if ((hi - lo) <= KD_W)	/* leaf: 1..KD_W points */
 	{
 		int node = (*next)++;
 		int count = hi - lo;
-		KDNodeV *nd = &t->nodes[node];
+		KDNodeGPU *nd = &t->nodes[node];
 
 		for (int i = 0; i < count; i++)
 		{
 			int p = t->perm[lo + i];
-			nd->xs[i]  = t->pts->x[p];
-			nd->ys[i]  = t->pts->y[p];
-			nd->zs[i]  = t->pts->z[p];
-			nd->idx[i] = p;
+			t->leaf_x  = t->pts->x[p];
+			t->leaf_y  = t->pts->y[p];
+			t->leaf_z  = t->pts->z[p];
+			t->leaf_idx = p;
 		}
 		/* Fill dead lanes with a real point (lane 0): their distances are
 		 * harmless duplicates that can never spuriously beat the nearest. */
 		for (int i = count; i < KD_W; i++)
 		{
-			nd->xs[i]  = nd->xs[0];
-			nd->ys[i]  = nd->ys[0];
-			nd->zs[i]  = nd->zs[0];
-			nd->idx[i] = nd->idx[0];
+			t->leaf_x[i]  = t->leaf_x[0];
+			t->leaf_y[i]  = t->leaf_y[0];
+			t->leaf_z[i]  = t->leaf_z[0];
+			t->leaf_idx[i] = t->leaf_idx[0];
 		}
 		nd->count = count;
+		nd->leaf_start = lo;
 		return node;
 	}
 
@@ -92,7 +80,7 @@ static int build_rec(KDTreeV *t, int *next, int lo, int hi, int depth)
 	return node;
 }
 
-static void flatten_bfs(KDTreeV *t, int n_nodes)
+static void flatten_bfs(KDTreeGPU *t, int n_nodes)
 {
 	int *queue = (int *)malloc((size_t)n_nodes * sizeof *queue);
 	int *newidx = (int *)malloc((size_t)n_nodes * sizeof *newidx);
@@ -112,11 +100,11 @@ static void flatten_bfs(KDTreeV *t, int n_nodes)
 		}
 	}
 
-	KDNodeV *neu = (KDNodeV *)malloc((size_t)n_nodes * sizeof *neu);
+	KDNodeV *neu = (KDNodeGPU *)malloc((size_t)n_nodes * sizeof *neu);
 	if (!neu) { perror("flatten_bfs"); exit(1); }
 	for (int i = 0; i < n_nodes; i++)
 	{
-		KDNodeV nd = t->nodes[queue[i]];
+		KDNodeGPU nd = t->nodes[queue[i]];
 		if (nd.count < 0)
 		{
 			nd.left = newidx[nd.left];
@@ -132,7 +120,7 @@ static void flatten_bfs(KDTreeV *t, int n_nodes)
 	free(newidx);
 }
 
-void kd_build(KDTreeV *t, const PointCloud *pts)
+void kd_build(KDTreeGPU *t, const PointCloud *pts)
 {
 	t->pts = pts;
 	t->n   = pts->n;
@@ -143,7 +131,7 @@ void kd_build(KDTreeV *t, const PointCloud *pts)
 	if (pts->n == 0) return;
 
 	t->perm  = (int *)malloc((size_t)pts->n * sizeof *t->perm);
-	t->nodes = (KDNodeV *)malloc((size_t)pts->n * sizeof *t->nodes);  /* over-allocation: total nodes < n */
+	t->nodes = (KDNodeGPU *)malloc((size_t)pts->n * sizeof *t->nodes);  /* over-allocation: total nodes < n */
 	if (!t->perm || !t->nodes) { perror("kd_build"); exit(1); }
 	for (int i = 0; i < pts->n; i++) t->perm[i] = i;
 
@@ -153,7 +141,7 @@ void kd_build(KDTreeV *t, const PointCloud *pts)
 	t->n_nodes = next;   /* flatten preserves the node count */
 }
 
-void kd_free(KDTreeV *t)
+void kd_free(KDTreeGPU *t)
 {
 	free(t->perm);
 	free(t->nodes);
@@ -171,12 +159,19 @@ void kd_free(KDTreeV *t)
  * current best. The KD_W-wide leaf buckets are scanned with an ordinary scalar
  * loop -- on the GPU the parallelism comes from the thread grid, not SIMD.
  */
-__device__ static void nn_search(const KDNodeV * __restrict__ nodes, int root,
-                                 float qxv, float qyv, float qzv,
-                                 int *out_idx, float *out_d2)
+__device__ static void nn_search(const KDNodeGPU * __restrict__ nodes, int root,
+				 const float * __restrict__ leaf_x,
+				 const float * __restrict__ leaf_y,
+				 const float * __restrict__ leaf_z,
+				 const float * __restrict__ leaf_idx,
+				 const float * __restrict__ qx,
+				 const float * __restrict__ qy,
+				 const float * __restirct__ qz,
+                                 int         * __restrict__ best_idx,
+				 float       * __restrict__ best_d2);
 {
-	int   stack[64];
-	float bound[64];
+	int   stack[32];
+	float bound[32];
 	int   sp = 0;
 	stack[sp] = root; bound[sp] = 0.0f; sp++;
 
@@ -187,17 +182,17 @@ __device__ static void nn_search(const KDNodeV * __restrict__ nodes, int root,
 	{
 		sp--;
 		if (bound[sp] >= bd) continue;	/* pruning */
-		const KDNodeV * __restrict__ nd = &nodes[stack[sp]];
+		const KDNodeGPU * __restrict__ nd = &nodes[stack[sp]];
 
 		if (nd->count >= 0)	/* leaf: scan the bucket */
 		{
 			for (int i = 0; i < nd->count; i++)
 			{
-				float dx = nd->xs[i] - qxv;
-				float dy = nd->ys[i] - qyv;
-				float dz = nd->zs[i] - qzv;
+				float dx = t->leaf_x[i] - qxv;
+				float dy = t->leaf_y[i] - qyv;
+				float dz = t->leaf_z[i] - qzv;
 				float d2 = (dx * dx) + (dy * dy) + (dz * dz);
-				if (d2 < bd) { bd = d2; bi = nd->idx[i]; }
+				if (d2 < bd) { bd = d2; bi = t->leaf_idx[i]; }
 			}
 			continue;
 		}
@@ -217,19 +212,31 @@ __device__ static void nn_search(const KDNodeV * __restrict__ nodes, int root,
 	*out_idx = bi;
 }
 
-__global__ void kd_nearest_kernel(const KDNodeV * __restrict__ nodes, int root, int qn,
-                                  const float * __restrict__ qx, const float * __restrict__ qy, const float * __restrict__ qz,
-                                  int * __restrict__ best_idx, float * __restrict__ best_d2)
+__global__ void kd_nearest_kernel(const KDNodeGPU * __restrict__ nodes, int root, int qn,
+				  const float * __restrict__ leaf_x,
+				  const float * __restrict__ leaf_y,
+				  const float * __restrict__ leaf_z,
+				  const int   * __restrict__ leaf_idx,
+                                  const float * __restrict__ qx, 
+				  const float * __restrict__ qy, 
+				  const float * __restirct__ qz,
+                                  int         * __restrict__ best_idx, 
+				  float       * __restrict__ best_d2);
 {
 	int idx = threadIdx.x + blockIdx.x * blockDim.x;
 	if (idx >= qn) return;
 
-	nn_search(nodes, root, qx[idx], qy[idx], qz[idx], &best_idx[idx], &best_d2[idx]);
+	nn_search(nodes, root, leaf_x, leaf_y, leaf_z, leaf_idx, qx[idx], qy[idx], qz[idx], &best_idx[idx], &best_d2[idx]);
 }
 
-__global__ void bf_nearest_kernel(const float * __restrict__ tx, const float * __restrict__ ty, const float * __restrict__ tz, int tn,
-                                  const float * __restrict__ qx, const float * __restrict__ qy, const float * __restrict__ qz, int qn,
-                                  int *best_idx, float *best_d2)
+__global__ void bf_nearest_kernel(const float * __restrict__ tx, 
+				  const float * __restrict__ ty, 
+				  const float * __restrict__ tz, int tn,
+                                  const float * __restrict__ qx, 
+				  const float * __restrict__ qy, 
+				  const float * __restrict__ qz, int qn,
+                                  int         * __restrict__ best_idx, 
+				  float       * __restrict__ best_d2)
 {
 	int idx = threadIdx.x + blockIdx.x * blockDim.x;
 	if (idx >= qn) return;
