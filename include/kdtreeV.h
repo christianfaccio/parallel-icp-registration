@@ -17,18 +17,7 @@
 #include <string.h>
 #include "pointcloud.h"
 
-/*
- * SIMD width KD_W = lanes per node bucket / per brute-force step.
- *   x86 AVX  -> 256-bit registers -> 8 floats
- *   ARM NEON -> 128-bit registers -> 4 floats
- * The whole algorithm is width-generic; this is the ONLY place the x86 and
- * ARM "versions" differ. Selected automatically from the target arch.
- */
-#if defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(__aarch64__)
-	#define KD_W 4
-#else
-	#define KD_W 16
-#endif
+#define KD_W 16
 
 typedef float vf   __attribute__((vector_size(KD_W * sizeof(float))));
 typedef float vf_u __attribute__((vector_size(KD_W * sizeof(float)), aligned(4)));
