@@ -3,6 +3,14 @@
 
 #include "pointcloud.h"
 
+/*
+ * GPU leaf bucket size. Unlike the CPU backends (where KD_W is the SIMD width),
+ * on the GPU the leaf is scanned by a single thread with a scalar loop, so this
+ * is purely a tree-depth vs. bucket-scan tuning knob -- a small value (4-8)
+ * keeps the tree shallow enough to limit warp divergence without over-scanning.
+ */
+#define KD_W 4
+
 typedef struct {
 	int count;
 	int axis;
@@ -31,9 +39,9 @@ __global__ void kd_nearest_kernel(const KDNodeGPU * __restrict__ nodes, int root
 				  const float * __restrict__ leaf_z,
 				  const int * __restrict__ leaf_idx,
                                   const float * __restrict__ qx, 
-				  const float * __restrict__ qy, 
-				  const float * __restirct__ qz,
-                                  int * __restrict__ best_idx, 
+				  const float * __restrict__ qy,
+				  const float * __restrict__ qz,
+                                  int * __restrict__ best_idx,
 				  float * __restrict__ best_d2);
 
 __global__ void bf_nearest_kernel(const float * __restrict__ tx, 
