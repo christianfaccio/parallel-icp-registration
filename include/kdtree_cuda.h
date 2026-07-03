@@ -9,7 +9,7 @@
  * is purely a tree-depth vs. bucket-scan tuning knob -- a small value (4-8)
  * keeps the tree shallow enough to limit warp divergence without over-scanning.
  */
-#define KD_W 4
+#define KD_W 64
 
 typedef struct {
 	int count;
