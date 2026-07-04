@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <math.h>
+#include <float.h>
 
 void voxel_build(VoxelGrid *vg, const PointCloud *pts, int bits, int iters)
 {
@@ -119,4 +120,66 @@ void voxel_free(VoxelGrid *vg)
 	vg->offsets = NULL;
 	vg->voxel_root = NULL;
 	vg->idx = NULL;
+}
+
+__global__ void voxel_nn_kernel(const int   * __restrict__ offsets,
+                                const int   * __restrict__ voxel_root,
+                                const float * __restrict__ vx,
+                                const float * __restrict__ vy,
+                                const float * __restrict__ vz,
+                                const int   * __restrict__ vidx,
+                                int G, long nv,
+                                float ox, float oy, float oz,
+                                float icx, float icy, float icz,
+                                const float * __restrict__ tx,
+                                const float * __restrict__ ty,
+                                const float * __restrict__ tz, int tn,
+                                const float * __restrict__ qx,
+                                const float * __restrict__ qy,
+                                const float * __restrict__ qz, int qn,
+                                int   * __restrict__ best_idx,
+                                float * __restrict__ best_d2)
+{
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+	if (idx >= qn) return;
+
+	float qxv = qx[idx], qyv = qy[idx], qzv = qz[idx];
+	
+	int qvx = (int)floor((qxv - ox) * icx);
+	int qvy = (int)floor((qyv - oy) * icy);
+	int qvz = (int)floor((qzv - oz) * icz);
+	if (qvx < 0) qvx = 0; else if (qvx > G - 1) qvx = G - 1;
+	if (qvy < 0) qvy = 0; else if (qvy > G - 1) qvy = G - 1;
+	if (qvz < 0) qvz = 0; else if (qvz > G - 1) qvz = G - 1;
+	
+	long qv = ((long)qvx * G + qvy) * G * qvz;
+	int r = voxel_root[qv];
+	
+	float bd = FLT_MAX;
+	int bi = -1;
+
+	if (r < 0)
+	{
+		for (int i = 0; i < tn; i++)
+		{
+			float dx = tx[i] - qxv;
+			float dy = ty[i] - qyv;
+			float dz = tz[i] - qzv;
+			float d2 = (dx * dx) + (dy * dy) + (dz * dz);
+			if (d2 < bd) { bd = d2; bi = i; }
+	} 
+	else
+	{
+		int start = offsets[r], end = offsets[r+1];
+		for (int i = start; i < end; i++)
+		{
+			float dx = vx[i] - qxv;
+			float dy = vy[i] - qyv;
+			float dz = vz[i] - qzv;
+			float d2 = (dx * dx) + (dy * dy) + (dz * dz);
+			if (d2 < bd) { bd = d2; bi = i; }
+	}
+
+	best_idx[idx] = bi;
+	best_d2[idx] = bd;	
 }
