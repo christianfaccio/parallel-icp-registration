@@ -4,21 +4,179 @@
 #include <math.h>
 #include <float.h>
 
+// helper for quantization and v computation
+__device__ __forceinline__ long voxel_of(float px, float py, float pz,
+					 int G, 
+					 float ox, float oy, float oz,
+					 float icx, float icy, float icz)
+{
+	int vx = (int)floor((px - ox) * icx);
+	int vy = (int)floor((py - oy) * icy);
+	int vz = (int)floor((pz - oz) * icz);
+	if (vx < 0) vx = 0; else if (vx > G - 1) vx = G - 1;
+	if (vy < 0) vy = 0; else if (vy > G - 1) vy = G - 1; 
+	if (vz < 0) vz = 0; else if (vz > G - 1) vz = G - 1;
+	return ((long)vx * G + vy) * G + vz;
+}
+
+__global__ void hist_kernel(float __restrict__ *px, float __restrict__ *py, float __restrict__ *pz,
+			    int G, int n, int *count,
+			    float __restrict__ *ox, float __restrict__ *oy, float __restrict__ *oz,
+			    float __restrict__ *icx, float __restrict__ *icy, float __restrict__ *icz)
+{
+	idx = threadIdx.x + blockIdx.x * blockDim.x;
+	if (idx > n) return;
+
+	long v = voxel_of(px[idx], py[idx], pz[idx], 
+			  G, 
+			  ox[idx], oy[idx], oz[idx], 
+			  icx[idx], icy[idx], icz[idx]);
+	atomicAdd(&count[v], 1);
+}
+
+__global__ scatter_kernel(float __restrict__ *px, float __restrict__ *py, float __restrict__ *pz,
+			  float *vx, float *vy, float *vz,
+			  int G, int n, int __restrict__ *cursor,
+			  float __restrict__ *ox, float __restrict__ *oy, float __restrict__ *oz,
+			  float __restrict__ *icx, float __restrict__ *icy, float __restrict__ *icz))
+{
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+	if (idx > n) return;
+	
+	long v = voxel_of(px[idx], py[idx], pz[idx],
+			  G, 
+			  ox[idx], oy[idx], oz[idx],
+			  icx[idx], icy[idx], icz[idx])
+	int slot = atomicAdd(&cursor[v], 1);
+	vx[slot] = px[idx];
+	vy[slot] = py[idx];
+	vz[slot] = pz[idx];
+	vidx[slot] = idx;
+}
+
+__global__ void init_root_kernel(float *voxel_root, float __restrict__ offsets, int n)
+{
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+	if (idx > n) return;
+
+	voxel_root[idx] = (offsets[idx+1] > offsets[idx]) ? (int)idx : -1;
+}
+
+__global__ void offsets_kernel(int *offsets, int *count, int n)
+{
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+	if (idx > n) return;
+
+	offsets[0] = 0;
+	offsets[idx+1] = offsets[idx] + count[idx];
+}
+
+__global__ void dilate_kernel(int *voxel_root, int G, int n)
+{
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+	if (idx > n) return;
+	
+	// check if voxel is empty, otherwise exit
+	if (voxel_root[idx] >= 0) 
+	{
+		return;
+	}
+
+	int vz = f % G, vy = (f / G) % G, vx = f / ((long)G * G); 	// decompose
+	
+	if (vz + 1 < G) { voxel_root[idx] = voxel_root[idx+1]; return; }
+	if (vz - 1 >= 0) { voxel_root[idx] = voxel_root[idx-1]; return; }
+	if (vy + 1 < G) { voxel_root[idx] = voxel_root[idx+G]; return; }
+	if (vy - 1 >= 0) { voxel_root[idx] = voxel_root[idx-G]; return; }
+	if (vx + 1 < G) { voxel_root[idx] = voxel_root[idx+G*G]; return; }
+	if (vx - 1 >= 0) { voxel_root[idx] = voxel_root[idx-G*G]; return; }
+}
+
 void voxel_build(VoxelGrid *vg, const PointCloud *pts, int bits, int iters)
 {
-	vg->n = pts->n;
+	int n = pts->n;
+	vg->n = n;
 	vg->bits = bits;
 	int G = 1<<bits;
 	vg->G = G;
-	vg->nv = (long)G*G*G;
+	long nv = (long)G*G*G;
+	vg->nv = nv;
 	double bmin[3], bmax[3];
 	pc_bounds(pts, bmin, bmax);
+	float origin[3];
+	float inv_cell[3];
 	for (int a = 0; a < 3; a++)
 	{
-		vg->origin[a] = bmin[a];
+		origin[a] = bmin[a];
+		vg->origin[a] = origin[a];
 		double ext = bmax[a] - bmin[a];
 		double cell = ext > 0 ? ext / G : 1.0;
-		vg->inv_cell[a] = 1.0 / cell;
+		inv_cell[a] = 1.0 / cell;
+		vg->inv_cell[a] = inv_cell[a];
+	}
+
+	int *d_offsets, *d_idx, *d_voxel_root; 
+	float *d_x, *d_y, *d_z; 
+	cudaMalloc(&d_offsets, (size_t)(nv + 1) * sizeof int);
+	cudaMalloc(&d_x, (size_t)n * sizeof float);
+	cudaMalloc(&d_y, (size_t)n * sizeof float);
+	cudaMalloc(&d_z, (size_t)n * sizeof float);
+	cudaMalloc(&d_idx, (size_t)n * sizeof int);
+	cudaMalloc(&d_voxel_root, (size_t)nv * sizeof int);
+	
+	int *d_count;
+	cudaMalloc(&d_count, (size_t)nv, sizeof int);
+	cudaMemset(d_count, 0, (size_t)nv * sizeof(int));
+	int *v;
+	cudaMalloc(&v, (size_t)n * sizeof int);
+	
+	float *d_pcx, *d_pcy, *d_pcz;
+	cudaMalloc(&d_pcx, (size_t)n * sizeof(float));
+	cudaMalloc(&d_pcy, (size_t)n * sizeof(float));
+	cudaMalloc(&d_pcz, (size_t)n * sizeof(float));
+	cudaMemcpy(d_pcx, pts->x, (size_t)n * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_pcy, pts->y, (size_t)n * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_pcz, pts->z, (size_t)n * sizeof(float), cudaMemcpyHostToDevice);
+
+	int  *d_ox, *d_oy, *d_oz;
+	cudaMalloc(&d_ox, sizeof(float));
+	cudaMalloc(&d_oy, sizeof(float));
+	cudaMalloc(&d_oz, sizeof(float));
+	cudaMemcpy(d_ox, origin[0], sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_oy, origin[1], sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_oz, origin[2], sizeof(float), cudaMemcpyHostToDevice);
+
+	int  *d_icx, *d_icy, *d_icz;
+	cudaMalloc(&d_icx, sizeof(float));
+	cudaMalloc(&d_icy, sizeof(float));
+	cudaMalloc(&d_icz, sizeof(float));
+	cudaMemcpy(d_icx, inv_cell[0], sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_icy, inv_cell[1], sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_icz, inv_cell[2], sizeof(float), cudaMemcpyHostToDevice);
+
+	hist_kernel<<<1,n>>>(d_pcx, d_pcy, d_pcz,
+			     G, n, d_count,
+			     d_ox, d_oy, d_oz,
+			     d_icx, d_icy, d_icz);
+	
+	offsets_kernel<<<1,nv>>>(d_count, d_offsets, nv);
+
+	int *d_cursor;
+	cudaMalloc(&d_cursor, (size_t)nv * sizeof int);
+	cudaMemcpy(d_cursor, d_offsets, (size_t)nv * sizeof int, cudaMemcpyHostToDevice);
+
+	scatter_kernel<<<1,n>>>(d_pcx, d_pcy, d_pcz,
+				d_x, d_y, d_z,
+			        G, n, d_cursor,
+			        d_ox, d_oy, d_oz,
+			        d_icx, d_icy, d_icz);	
+	
+	// Dilation
+	init_root_kernel<<<1,nv>>>(d_offsets, d_voxel_root, nv);
+	
+	for (int iter = 0; iter < iters; iter++)
+	{
+		dilate_kernel<<<1,nv>>>(voxel_root, G, n);
 	}
 
 	vg->offsets = malloc((size_t)(vg->nv + 1) * sizeof *vg->offsets);
@@ -27,83 +185,17 @@ void voxel_build(VoxelGrid *vg, const PointCloud *pts, int bits, int iters)
 	vg->z = malloc((size_t)vg->n * sizeof *vg->z);
 	vg->idx = malloc((size_t)vg->n * sizeof *vg->idx);
 	vg->voxel_root = malloc((size_t)vg->nv * sizeof *vg->voxel_root);
+
+	cudaMemcpy(d_offsets, vg->offsets, (size_t)(nv+1) * sizeof(int));
+	cudaMemcpy(d_x, vg->x, (size_t)n * sizeof(float));
+	cudaMemcpy(d_y, vg->y, (size_t)n * sizeof(float));
+	cudaMemcpy(d_z, vg->z, (size_t)n * sizeof(float));
+	cudaMemcpy(d_idx, vg->idx, (size_t)n * sizeof(int));
+	cudaMemcpy(d_voxel_root, vg->voxel_root, (size_t)n * sizeof(int));
 	
-	int *count = calloc((size_t)vg->nv, sizeof *count);
-	int *v = malloc((size_t)vg->n * sizeof *v);
-
-	// quantization
-	for (int i = 0; i < pts->n; i++)
-	{
-		int vx = (int)floor((pts->x[i] - vg->origin[0] * vg->inv_cell[0]);
-		int vy = (int)floor((pts->y[i] - vg->origin[1] * vg->inv_cell[1]);
-		int vz = (int)floor((pts->z[i] - vg->origin[2] * vg->inv_cell[2]);
-		if (vx < 0) vx = 0; else if (vx > G - 1) vx = G - 1;
-		if (vy < 0) vy = 0; else if (vy > G - 1) vy = G - 1;
-		if (vz < 0) vz = 0; else if (vz > G - 1) vz = G - 1;
-
-		v[i] = (vx * G + vy) * G + vz;
-		count[v[i]]++;
-	}
-	
-	vg->offsets[0] = 0;
-	for (long c = 0; c < vg->nv; c++)
-	{
-		vg->offsets[c+1] = vg->offsets[c] + count[c];
-	}
-
-	int *cursor = malloc((size_t)vg->nv * sizeof *cursor);
-	for (long c = 0; c < vg->nv; c++) cursor[c] = vg->offsets[c];
-	for (int i = 0; i < vg->n; i++)
-	{
-		int slot = cursor[v[i]]++;
-		vg->x[slot] = pts->x[i];
-		vg->y[slot] = pts->y[i];
-		vg->z[slot] = pts->z[i];
-		vg->idx[slot] = i;
-	}
-
-	// Dilation
-
-	for (long c = 0; c < vg->nv; c++)
-		vg->voxel_root[c] = (vg->offsets[c+1] > vg->offsets[c]) ? (int)c : -1;
-	
-	long *frontier = malloc((size_t)vg->nv * sizeof *frontier);
-	long *next = malloc((size_t)vg->nv * sizeof *next);
-	long fn = 0;
-	for (long c = 0; c < vg->nv; c++)
-		if (vg->voxel_root[c] >= 0) frontier[fn++] = c;
-
-	for (int iter = 0; iter < iters && fn > 0; iter++)
-	{
-		long nn = 0;
-		for (long k = 0; k < fn; k++)
-		{
-			long f = frontier[k];
-			int root = vg->voxel_root[f];
-			int vz = f % G, vy = (f / G) % G, vx = f / ((long)G * G);
-
-			#define TRY(nb) do {long _n=(nb); \
-				if (vg->voxel_root[_n] == -1) { vg->voxel_root[_n] = root; next[nn++] = _n; } \
-			} while (0)
-			if (vz + 1 < G) TRY(f + 1);
-			if (vz - 1 >= 0) TRY(f - 1);
-			if (vy + 1 < G) TRY(f + G);
-			if (vy - 1 >= 0) TRY(f - G);
-			if (vx + 1 < G) TRY(f + (long)G*G);
-			if (vx - 1 >= 0) TRY(f - (long)G*G);
-			#undef TRY
-		}
-		long *tmp = frontier; 
-		frontier = next;
-		next = tmp;
-		fn = nn;
-	}
-
-	free(cursor);
-	free(count);
-	free(v);
-	free(frontier);
-	free(next);
+	cudaFree(d_cursor);
+	cudaFree(d_count);
+	cudaFree(v);
 }
 
 void voxel_free(VoxelGrid *vg)
