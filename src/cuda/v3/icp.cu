@@ -163,11 +163,11 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 	pc_morton_order(src, &cur);   /* working cloud: deep copy of src, Morton-ordered */
 
 	VoxelGrid vg;
-	if (prm->use_voxel) voxel_build(&vg, tgt, 6, 9);
-	res->t_setup = now_sec() - ts0;   
+	voxel_build(&vg, tgt, 6, 9);   /* v3: target voxel grid (bits=6, 9 dilation passes) */
+	res->t_setup = now_sec() - ts0;
 
 	int Ntpb = 256;
-	int Nb   = (vg.nv + Ntpb - 1) / Ntpb;
+	int Nb   = (cur.n + Ntpb - 1) / Ntpb;   /* one thread per query point */
 
 	/* --- device buffers: all allocated once, outside the loop ----------- */
 	double tu0 = now_sec();
@@ -188,6 +188,25 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 	CUDA_CHECK(cudaMemcpy(d_tx, tgt->x, (size_t)tgt->n * sizeof(float), cudaMemcpyHostToDevice));
 	CUDA_CHECK(cudaMemcpy(d_ty, tgt->y, (size_t)tgt->n * sizeof(float), cudaMemcpyHostToDevice));
 	CUDA_CHECK(cudaMemcpy(d_tz, tgt->z, (size_t)tgt->n * sizeof(float), cudaMemcpyHostToDevice));
+
+	/* voxel grid, uploaded once (the target never moves). voxel_build() returns
+	 * host arrays; the NN kernel needs them resident on the device.
+	 *   offsets:    nv+1 ints    voxel_root: nv ints
+	 *   x/y/z/idx:  tgt->n each  (target points reordered by voxel) */
+	int   *d_voff, *d_vroot, *d_vidx;
+	float *d_vx, *d_vy, *d_vz;
+	CUDA_CHECK(cudaMalloc(&d_voff,  (size_t)(vg.nv + 1) * sizeof(int)));
+	CUDA_CHECK(cudaMalloc(&d_vroot, (size_t)vg.nv * sizeof(int)));
+	CUDA_CHECK(cudaMalloc(&d_vx,    (size_t)tgt->n * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&d_vy,    (size_t)tgt->n * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&d_vz,    (size_t)tgt->n * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&d_vidx,  (size_t)tgt->n * sizeof(int)));
+	CUDA_CHECK(cudaMemcpy(d_voff,  vg.offsets,    (size_t)(vg.nv + 1) * sizeof(int),   cudaMemcpyHostToDevice));
+	CUDA_CHECK(cudaMemcpy(d_vroot, vg.voxel_root, (size_t)vg.nv * sizeof(int),         cudaMemcpyHostToDevice));
+	CUDA_CHECK(cudaMemcpy(d_vx,    vg.x,          (size_t)tgt->n * sizeof(float),      cudaMemcpyHostToDevice));
+	CUDA_CHECK(cudaMemcpy(d_vy,    vg.y,          (size_t)tgt->n * sizeof(float),      cudaMemcpyHostToDevice));
+	CUDA_CHECK(cudaMemcpy(d_vz,    vg.z,          (size_t)tgt->n * sizeof(float),      cudaMemcpyHostToDevice));
+	CUDA_CHECK(cudaMemcpy(d_vidx,  vg.idx,        (size_t)tgt->n * sizeof(int),        cudaMemcpyHostToDevice));
 
 	/* per-query NN results + match, and the small reduction outputs */
 	int   *d_bi;    float *d_bd2;
@@ -221,14 +240,14 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 
 		/* --- 1+2. nearest neighbour + rejection ------------------------- */
 		double t0 = now_sec();
-		voxel_nn_kernel<<<Nb, Ntpb>>>(vg->offsets, vg->voxel_root, 
-					      vg->x, vg->y, vg->z, vg->idx,
-					      vg->G, vg->nv,
-					      vg->origin[0], vg->origin[1], vg->origin[2],
-					      vg->inv_cell[0], vg->inv_cell[1], vg->inv_cell[2],
+		voxel_nn_kernel<<<Nb, Ntpb>>>(d_voff, d_vroot,
+					      d_vx, d_vy, d_vz, d_vidx,
+					      vg.G, vg.nv,
+					      (float)vg.origin[0], (float)vg.origin[1], (float)vg.origin[2],
+					      (float)vg.inv_cell[0], (float)vg.inv_cell[1], (float)vg.inv_cell[2],
 					      d_tx, d_ty, d_tz, tgt->n,
-					      d_sx, d_sy, d_sz, cur->n,
-					      d_bi, d_bd2)
+					      d_sx, d_sy, d_sz, cur.n,
+					      d_bi, d_bd2);
 		CUDA_CHECK(cudaGetLastError());
 		compute_match<<<Nb, Ntpb>>>(d_match, d_bd2, d_bi, (float)max_d2, cur.n);
 		CUDA_CHECK(cudaGetLastError());
@@ -298,6 +317,8 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 
 	cudaFree(d_sx); cudaFree(d_sy); cudaFree(d_sz);
 	cudaFree(d_tx); cudaFree(d_ty); cudaFree(d_tz);
+	cudaFree(d_voff); cudaFree(d_vroot); cudaFree(d_vidx);
+	cudaFree(d_vx); cudaFree(d_vy); cudaFree(d_vz);
 	cudaFree(d_bi); cudaFree(d_bd2); cudaFree(d_match);
 	cudaFree(d_cs); cudaFree(d_ct); cudaFree(d_m);
 	cudaFree(d_H);  cudaFree(d_sse);

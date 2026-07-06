@@ -19,6 +19,7 @@ typedef struct {
 	double tol;             /* stop when |delta RMSE| < tol */
 	double max_corr_dist;   /* reject correspondences farther than this */
 	int    use_kdtree;      /* 1 = KD-tree, 0 = brute force */
+	int    use_voxel;       /* 1 = voxel grid (CUDA v3); ignored by other backends */
 } ICPParams;
 
 typedef struct {

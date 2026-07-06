@@ -6,12 +6,12 @@
  * reports convergence, accuracy vs ground truth, and a per-stage timing
  * breakdown (the data the parallelization phases will try to improve).
  *
- *   ./bin/icp_serial [n_points] [max_iters] [perturb] [kdtree|brute] [seed]
+ *   ./bin/icp_cuda_v3 [n_points] [max_iters] [perturb] [voxel] [seed]
  *
- *   n_points   target cloud size            (default 50000)
+ *   n_points   target cloud size            (default 100000)
  *   max_iters  ICP iteration cap            (default 50)
  *   perturb    ground-truth transform scale (default 1.0)
- *   backend    "kdtree" or "brute"          (default kdtree)
+ *   backend    "voxel" (v3 supports voxel only; default voxel)
  *   seed       RNG seed                     (default 12345)
  *
  * Set ICP_DUMP=1 to also write target.pcd / source_initial.pcd /
@@ -51,11 +51,10 @@ int main(int argc, char **argv)
 	int      n         = argc > 1 ? atoi(argv[1]) : 100000;
 	int      max_iters = argc > 2 ? atoi(argv[2]) : 50;
 	double   perturb   = argc > 3 ? atof(argv[3]) : 1.0;
-	int      use_kd    = 1;
+	int      use_voxel = 1;
 	if (argc > 4) {
-		if      (strcmp(argv[4], "brute")  == 0) use_kd = 0;
-		else if (strcmp(argv[4], "kdtree") == 0) use_kd = 1;
-		else { fprintf(stderr, "backend must be 'kdtree' or 'brute'\n"); return 1; }
+		if (strcmp(argv[4], "voxel") == 0) use_voxel = 1;
+		else { fprintf(stderr, "v3 backend must be 'voxel'\n"); return 1; }
 	}
 	uint64_t seed = argc > 5 ? strtoull(argv[5], NULL, 10) : 12345ULL;
 
@@ -88,7 +87,7 @@ int main(int argc, char **argv)
 		.max_iters     = max_iters,
 		.tol           = 1e-6,
 		.max_corr_dist = 1.0,
-		.use_kdtree    = use_kd,
+		.use_voxel     = use_voxel,
 	};
 	ICPResult res;
 	t0 = now_sec();
@@ -111,8 +110,8 @@ int main(int argc, char **argv)
 	double trans_err = sqrt(dT[0]*dT[0] + dT[1]*dT[1] + dT[2]*dT[2]);
 
 	/* --- report --------------------------------------------------------- */
-	printf("==== Serial ICP (point-to-point, Kabsch/SVD) ====\n");
-	printf("backend         : %s\n", use_kd ? "KD-tree" : "brute force");
+	printf("==== CUDA v3 ICP (point-to-point, Kabsch/SVD) ====\n");
+	printf("backend         : %s\n", use_voxel ? "voxel grid" : "(none)");
 	printf("target points   : %d\n", tgt.n);
 	printf("source points   : %d  (keep 85%%, +5%% outliers, noise 0.01 m)\n", src.n);
 	printf("seed            : %llu\n", (unsigned long long)seed);
