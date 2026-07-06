@@ -3,7 +3,7 @@
 #endif
 
 #include "icp.h"
-#include "kdtree_cuda.h"
+#include "voxel_cuda.h"
 #include "linalg.h"
 #include "pointcloud.h"
 
@@ -162,12 +162,12 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 	PointCloud cur;
 	pc_morton_order(src, &cur);   /* working cloud: deep copy of src, Morton-ordered */
 
-	KDTreeGPU tree;
-	if (prm->use_kdtree) kd_build(&tree, tgt);
+	VoxelGrid vg;
+	if (prm->use_voxel) voxel_build(&vg, tgt, 6, 9);
 	res->t_setup = now_sec() - ts0;   
 
 	int Ntpb = 256;
-	int Nb   = (cur.n + Ntpb - 1) / Ntpb;
+	int Nb   = (vg.nv + Ntpb - 1) / Ntpb;
 
 	/* --- device buffers: all allocated once, outside the loop ----------- */
 	double tu0 = now_sec();
@@ -189,29 +189,6 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 	CUDA_CHECK(cudaMemcpy(d_ty, tgt->y, (size_t)tgt->n * sizeof(float), cudaMemcpyHostToDevice));
 	CUDA_CHECK(cudaMemcpy(d_tz, tgt->z, (size_t)tgt->n * sizeof(float), cudaMemcpyHostToDevice));
 
-	/* kd-tree node pool, uploaded once (the target never moves) */
-	KDNodeGPU *d_nodes = NULL;
-	if (prm->use_kdtree) {
-		CUDA_CHECK(cudaMalloc(&d_nodes, (size_t)tree.n_nodes * sizeof(KDNodeGPU)));
-		CUDA_CHECK(cudaMemcpy(d_nodes, tree.nodes,
-		                      (size_t)tree.n_nodes * sizeof(KDNodeGPU),
-		                      cudaMemcpyHostToDevice));
-	}
-
-	/* leaf side arrays: one entry per target point, indexed by leaf_start */
-	float *d_leaf_x = NULL, *d_leaf_y = NULL, *d_leaf_z = NULL;
-	int   *d_leaf_idx = NULL;
-	if (prm->use_kdtree) {
-		CUDA_CHECK(cudaMalloc(&d_leaf_x,   (size_t)tgt->n * sizeof(float)));
-		CUDA_CHECK(cudaMalloc(&d_leaf_y,   (size_t)tgt->n * sizeof(float)));
-		CUDA_CHECK(cudaMalloc(&d_leaf_z,   (size_t)tgt->n * sizeof(float)));
-		CUDA_CHECK(cudaMalloc(&d_leaf_idx, (size_t)tgt->n * sizeof(int)));
-		CUDA_CHECK(cudaMemcpy(d_leaf_x,   tree.leaf_x,   (size_t)tgt->n * sizeof(float), cudaMemcpyHostToDevice));
-		CUDA_CHECK(cudaMemcpy(d_leaf_y,   tree.leaf_y,   (size_t)tgt->n * sizeof(float), cudaMemcpyHostToDevice));
-		CUDA_CHECK(cudaMemcpy(d_leaf_z,   tree.leaf_z,   (size_t)tgt->n * sizeof(float), cudaMemcpyHostToDevice));
-		CUDA_CHECK(cudaMemcpy(d_leaf_idx, tree.leaf_idx, (size_t)tgt->n * sizeof(int),   cudaMemcpyHostToDevice));
-	}
-	
 	/* per-query NN results + match, and the small reduction outputs */
 	int   *d_bi;    float *d_bd2;
 	int   *d_match;
@@ -244,13 +221,14 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 
 		/* --- 1+2. nearest neighbour + rejection ------------------------- */
 		double t0 = now_sec();
-		if (prm->use_kdtree)
-			kd_nearest_kernel<<<Nb, Ntpb>>>(d_nodes, tree.root, cur.n,
-							d_leaf_x, d_leaf_y, d_leaf_z, d_leaf_idx,
-			                                d_sx, d_sy, d_sz, d_bi, d_bd2);
-		else
-			bf_nearest_kernel<<<Nb, Ntpb>>>(d_tx, d_ty, d_tz, tgt->n,
-			                                d_sx, d_sy, d_sz, cur.n, d_bi, d_bd2);
+		voxel_nn_kernel<<<Nb, Ntpb>>>(vg->offsets, vg->voxel_root, 
+					      vg->x, vg->y, vg->z, vg->idx,
+					      vg->G, vg->nv,
+					      vg->origin[0], vg->origin[1], vg->origin[2],
+					      vg->inv_cell[0], vg->inv_cell[1], vg->inv_cell[2],
+					      d_tx, d_ty, d_tz, tgt->n,
+					      d_sx, d_sy, d_sz, cur->n,
+					      d_bi, d_bd2)
 		CUDA_CHECK(cudaGetLastError());
 		compute_match<<<Nb, Ntpb>>>(d_match, d_bd2, d_bi, (float)max_d2, cur.n);
 		CUDA_CHECK(cudaGetLastError());
@@ -320,16 +298,12 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 
 	cudaFree(d_sx); cudaFree(d_sy); cudaFree(d_sz);
 	cudaFree(d_tx); cudaFree(d_ty); cudaFree(d_tz);
-	if (prm->use_kdtree) {
-		cudaFree(d_nodes);
-		cudaFree(d_leaf_x); cudaFree(d_leaf_y); cudaFree(d_leaf_z); cudaFree(d_leaf_idx);
-	}
 	cudaFree(d_bi); cudaFree(d_bd2); cudaFree(d_match);
 	cudaFree(d_cs); cudaFree(d_ct); cudaFree(d_m);
 	cudaFree(d_H);  cudaFree(d_sse);
 	cudaFree(d_R);  cudaFree(d_T);
 
-	if (prm->use_kdtree) kd_free(&tree);
+	voxel_free(&vg);
 	pc_free(&cur);
 	return 0;
 }
