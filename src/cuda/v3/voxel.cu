@@ -179,19 +179,12 @@ void voxel_build(VoxelGrid *vg, const PointCloud *pts, int bits, int iters)
 		dilate_kernel<<<1,nv>>>(voxel_root, G, n);
 	}
 
-	vg->offsets = malloc((size_t)(vg->nv + 1) * sizeof *vg->offsets);
-	vg->x = malloc((size_t)vg->n * sizeof *vg->x);
-	vg->y = malloc((size_t)vg->n * sizeof *vg->y);
-	vg->z = malloc((size_t)vg->n * sizeof *vg->z);
-	vg->idx = malloc((size_t)vg->n * sizeof *vg->idx);
-	vg->voxel_root = malloc((size_t)vg->nv * sizeof *vg->voxel_root);
-
-	cudaMemcpy(d_offsets, vg->offsets, (size_t)(nv+1) * sizeof(int));
-	cudaMemcpy(d_x, vg->x, (size_t)n * sizeof(float));
-	cudaMemcpy(d_y, vg->y, (size_t)n * sizeof(float));
-	cudaMemcpy(d_z, vg->z, (size_t)n * sizeof(float));
-	cudaMemcpy(d_idx, vg->idx, (size_t)n * sizeof(int));
-	cudaMemcpy(d_voxel_root, vg->voxel_root, (size_t)n * sizeof(int));
+	cudaMemcpy(vg->offsets, d_offsets, (size_t)(nv+1) * sizeof(int), cudaMemcpyDeviceToHost);
+	cudaMemcpy(vg->x, d_x, (size_t)n * sizeof(float), cudaMemcpyDeviceToHost);
+	cudaMemcpy(vg->y, d_y, (size_t)n * sizeof(float), cudaMemcpyDeviceToHost);
+	cudaMemcpy(vg->z, d_z, (size_t)n * sizeof(float), cudaMemcpyDeviceToHost);
+	cudaMemcpy(vg->idx, d_idx, (size_t)n * sizeof(int), cudaMemcpyDeviceToHost);
+	cudaMemcpy(vg->voxel_root, d_voxel_root, (size_t)n * sizeof(int), cudaMemcpyDeviceToHost);
 	
 	cudaFree(d_cursor);
 	cudaFree(d_count);
