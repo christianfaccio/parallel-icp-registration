@@ -275,15 +275,14 @@ __global__ void voxel_nn_kernel(const int   * __restrict__ offsets,
 	float bd = FLT_MAX;
 	int bi = -1;
 
-	if (r < 0) {
-		for (int i = 0; i < tn; i++) {
-			float dx = tx[i] - qxv;
-			float dy = ty[i] - qyv;
-			float dz = tz[i] - qzv;
-			float d2 = dx * dx + dy * dy + dz * dz;
-			if (d2 < bd) { bd = d2; bi = i; }
-		}
-	} else {
+	/* Scan only the query's (dilated) voxel. An empty voxel (r < 0, i.e. still
+	 * unfilled after dilation -- deep outliers / no-overlap points) yields no
+	 * match: we leave bi = -1 / bd = FLT_MAX so it is rejected downstream by
+	 * max_corr_dist. The old full-cloud brute-force fallback is removed: it was
+	 * a ~500k-point serial scan on a tiny fraction of threads that serialised
+	 * the tail and collapsed occupancy (see ncu), while only ever producing a
+	 * correspondence that correspondence-rejection discarded anyway. */
+	if (r >= 0) {
 		int start = offsets[r], end = offsets[r + 1];
 		for (int i = start; i < end; i++) {
 			float dx = vx[i] - qxv;
