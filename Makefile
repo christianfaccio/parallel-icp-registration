@@ -46,7 +46,7 @@ OPT      := -O3 -march=native
 VEC      := -ftree-vectorize -funroll-loops -mtune=native
 VEC_INFO := -fopt-info-vec-optimized -fopt-info-vec-missed -fopt-info-vec-all
 CPPFLAGS := -Iinclude
-CFLAGS   := $(CSTD) $(WARN) $(OPT)
+CFLAGS   := $(CSTD) $(WARN) $(OPT) -g -fno-omit-frame-pointer
 LDLIBS   := -lm
 
 # ---- Serial: sources & objects ----------------------------------------------
@@ -235,7 +235,7 @@ BUILD_DIR_BASE := build/baseline
 BIN_DIR_BASE   := bin/baseline
 OBJECTS_BASE   := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR_BASE)/%.o,$(SOURCES))
 TARGET_BASE    := $(BIN_DIR_BASE)/icp_baseline
-BASE_CFLAGS    := $(CSTD) $(WARN) -O0
+BASE_CFLAGS    := $(CSTD) $(WARN) -O0 -g -fno-omit-frame-pointer
 
 .PHONY: baseline
 baseline: $(TARGET_BASE)
