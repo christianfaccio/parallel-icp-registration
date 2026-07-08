@@ -9,3 +9,7 @@ tools/
 *.png
 out/
 .DS_Store
+
+# other
+report/
+assets/
