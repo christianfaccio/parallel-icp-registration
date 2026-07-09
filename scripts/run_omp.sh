@@ -16,10 +16,10 @@
 # SLURM allocation gives you at least max(THREADS) cores (--cpus-per-task).
 #
 # Usage:
-#   make omp
-#   scripts/run_omp.sh [output.csv] [max_iters] [seed]
+#   make omp_v0                  # or omp_v1, ...
+#   scripts/run_omp.sh [output.csv] [version] [max_iters] [seed]
 #
-# Defaults: out=out/openmp/omp.csv, max_iters=50, seed=12345.
+# Defaults: out=out/openmp/omp_<version>.csv, version=v0, max_iters=50, seed=12345.
 # Override the sweeps from the environment, e.g.:
 #   OMP_THREADS_LIST="1 2 4 8 16 32" NS_LIST="46811 150000" scripts/run_omp.sh
 
@@ -28,13 +28,15 @@ export LC_ALL=C   # force '.' decimal separator so awk printf doesn't emit comma
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-OUT="${1:-out/openmp/omp.csv}"
-MAX_ITERS="${2:-50}"
-SEED="${3:-12345}"
+VERSION="${2:-v0}"
+BIN="$HERE/bin/openmp/icp_openmp_$VERSION"
 
-BIN="$HERE/bin/openmp/icp_openmp"
+OUT="${1:-out/openmp/omp_$VERSION.csv}"
+MAX_ITERS="${3:-50}"
+SEED="${4:-12345}"
+
 if [[ ! -x "$BIN" ]]; then
-	echo "error: $BIN not found. Build it first with: make omp" >&2
+	echo "error: $BIN not found. Build it first with: make omp_$VERSION" >&2
 	exit 1
 fi
 

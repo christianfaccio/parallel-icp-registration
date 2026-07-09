@@ -18,9 +18,15 @@
 #   Each src/vectorized/<ver>/ is a self-contained source set (its own icp.c,
 #   kdtreeV*.c, main.c, ...), built into its own binary.
 #
-# OpenMP (src/openmp/ backend: flattened kd-tree + threaded query loop):
-#   make omp        build bin/openmp/icp_openmp (vectorized leaf + -fopenmp)
-#   make run_omp    build then run it (set OMP_NUM_THREADS to pick thread count)
+# OpenMP (versioned, folder-per-version like vectorized/CUDA):
+#   make omp        build ALL versions found under src/openmp/v*
+#   make omp_v0     build only bin/openmp/icp_openmp_v0
+#   make run_omp_v0 build then run it (set OMP_NUM_THREADS to pick thread count)
+#
+#   Each src/openmp/<ver>/ is a self-contained source set (its own icp.c,
+#   kdtreeV*.c, main.c, ...), compiled with VEC for the SIMD leaf/batch and
+#   -fopenmp for the threads. Versions are discovered automatically, so new
+#   src/openmp/v* folders need no Makefile edit.
 #
 # CUDA (versioned GPU backends, folder-per-version like vectorized):
 #   make cuda       build ALL versions found under src/cuda/v*  (needs nvcc)
@@ -118,10 +124,12 @@ run_vec_$(1): $$(BIN_DIR_VEC)/icp_vectorized_$(1)
 endef
 $(foreach V,$(VERSIONS),$(eval $(call VEC_RULE,$(V))))
 
-# ---- OpenMP: dedicated src/openmp/ backend ----------------------------------
-# Its own sources (flattened kd-tree + the threaded query loop in icp.c),
-# compiled with VEC for the SIMD leaf and -fopenmp for the threads. Single
-# binary; pick the thread count at run time with OMP_NUM_THREADS.
+# ---- OpenMP: versioned backends (folder-per-version) ------------------------
+# Mirrors the vectorized/CUDA layout: each src/openmp/<ver>/ is a self-contained
+# source set (its own icp.c, kdtreeV*.c, main.c, ...), compiled with VEC for the
+# SIMD leaf/batch and -fopenmp for the threads, into bin/openmp/icp_openmp_<ver>,
+# objects kept apart in build/openmp/<ver>/. Pick the thread count at run time
+# with OMP_NUM_THREADS. Versions are discovered automatically.
 
 OMP           := -fopenmp
 SRC_DIR_OMP   := src/openmp
@@ -129,25 +137,36 @@ BUILD_DIR_OMP := build/openmp
 BIN_DIR_OMP   := bin/openmp
 
 OMP_CFLAGS  := $(CFLAGS) $(VEC) $(OMP)
-SOURCES_OMP := $(wildcard $(SRC_DIR_OMP)/*.c)
-OBJECTS_OMP := $(patsubst $(SRC_DIR_OMP)/%.c,$(BUILD_DIR_OMP)/%.o,$(SOURCES_OMP))
-TARGET_OMP  := $(BIN_DIR_OMP)/icp_openmp
+
+OMP_VERSIONS := $(notdir $(wildcard $(SRC_DIR_OMP)/v*))
 
 .PHONY: omp
-omp: $(TARGET_OMP)
+omp: $(foreach V,$(OMP_VERSIONS),$(BIN_DIR_OMP)/icp_openmp_$(V))
 
-$(TARGET_OMP): $(OBJECTS_OMP) | $(BIN_DIR_OMP)
-	$(CC) $(OMP_CFLAGS) $(OBJECTS_OMP) $(LDLIBS) -o $@
-
-$(BUILD_DIR_OMP)/%.o: $(SRC_DIR_OMP)/%.c | $(BUILD_DIR_OMP)
-	$(CC) $(CPPFLAGS) $(OMP_CFLAGS) -MMD -MP -c $< -o $@
-
-$(BUILD_DIR_OMP) $(BIN_DIR_OMP):
+$(BIN_DIR_OMP):
 	mkdir -p $@
 
-.PHONY: run_omp
-run_omp: $(TARGET_OMP)
-	./$(TARGET_OMP)
+define OMP_RULE
+SRCS_OMP_$(1) := $$(wildcard $$(SRC_DIR_OMP)/$(1)/*.c)
+OBJS_OMP_$(1) := $$(patsubst $$(SRC_DIR_OMP)/$(1)/%.c,$$(BUILD_DIR_OMP)/$(1)/%.o,$$(SRCS_OMP_$(1)))
+
+$$(BUILD_DIR_OMP)/$(1):
+	mkdir -p $$@
+
+$$(BUILD_DIR_OMP)/$(1)/%.o: $$(SRC_DIR_OMP)/$(1)/%.c | $$(BUILD_DIR_OMP)/$(1)
+	$$(CC) $$(CPPFLAGS) $$(OMP_CFLAGS) -MMD -MP -c $$< -o $$@
+
+$$(BIN_DIR_OMP)/icp_openmp_$(1): $$(OBJS_OMP_$(1)) | $$(BIN_DIR_OMP)
+	$$(CC) $$(OMP_CFLAGS) $$(OBJS_OMP_$(1)) $$(LDLIBS) -o $$@
+
+.PHONY: omp_$(1)
+omp_$(1): $$(BIN_DIR_OMP)/icp_openmp_$(1)
+
+.PHONY: run_omp_$(1)
+run_omp_$(1): $$(BIN_DIR_OMP)/icp_openmp_$(1)
+	./$$<
+endef
+$(foreach V,$(OMP_VERSIONS),$(eval $(call OMP_RULE,$(V))))
 
 # ---- CUDA: versioned GPU backends (folder-per-version) ----------------------
 # Mirrors the vectorized layout: each src/cuda/<ver>/ is a self-contained set of
@@ -267,5 +286,5 @@ clean:
 -include $(OBJECTS:.o=.d)
 -include $(OBJECTS_BASE:.o=.d)
 -include $(wildcard $(BUILD_DIR_VEC)/*/*.d)
--include $(wildcard $(BUILD_DIR_OMP)/*.d)
+-include $(wildcard $(BUILD_DIR_OMP)/*/*.d)
 -include $(wildcard $(BUILD_DIR_CUDA)/*/*.d)

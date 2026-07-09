@@ -13,5 +13,8 @@
 # so do NOT export it here. Hand the allocated cores to the OpenMP runtime.
 export SRUN_CPUS_PER_TASK="${SLURM_CPUS_PER_TASK}"   # keep srun affinity sane if used
 
-make omp
-bash scripts/run_omp.sh "out/openmp/omp.csv" 50 12345
+# Which versioned OpenMP backend to build and sweep (v0, v1, ...).
+VERSION="${VERSION:-v0}"
+
+make omp_$VERSION
+bash scripts/run_omp.sh "out/openmp/omp_$VERSION.csv" "$VERSION" 50 12345
