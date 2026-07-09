@@ -6,7 +6,7 @@
 #define _POSIX_C_SOURCE 199309L
 
 #include "icp.h"
-#include "kdtree.h"
+#include "kdtreeV.h"
 #include "linalg.h"
 
 #include <stdlib.h>
@@ -33,7 +33,7 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 	PointCloud cur;
 	pc_copy(src, &cur);          /* working cloud, transformed in place */
 
-	KDTree tree;
+	KDTreeV tree;
 	if (prm->use_kdtree) kd_build(&tree, tgt);
 	res->t_setup  = now_sec() - ts0;   /* one-time host build + reorder */
 	res->t_ctx    = 0.0;               /* no GPU context on CPU backends */
