@@ -14,8 +14,6 @@
  *   backend    "kdtree" or "brute"          (default kdtree)
  *   seed       RNG seed                     (default 12345)
  *
- * Set ICP_DUMP=1 to also write target.pcd / source_initial.pcd /
- * source_aligned.pcd for tools/render_pcd.py.
  */
 
 #define _POSIX_C_SOURCE 199309L
