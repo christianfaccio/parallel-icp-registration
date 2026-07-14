@@ -43,7 +43,7 @@ fi
 # Thread counts and problem sizes (override via env). Threading overhead
 # dominates on tiny clouds, so the size list starts where it begins to pay off.
 THREADS="${OMP_THREADS_LIST:-1 2 4 8 16 32}"
-read -r -a NS <<< "${NS_LIST:-6000 12000 25000 46811 80000 100000 150000}"
+read -r -a NS <<< "${NS_LIST:-500000}"
 
 # Reproducible thread placement: one thread per physical core, bound.
 export OMP_PROC_BIND=close

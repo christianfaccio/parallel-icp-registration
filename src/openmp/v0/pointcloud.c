@@ -5,6 +5,7 @@
 
 #include "pointcloud.h"
 #include "linalg.h"
+#include "utils.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -180,4 +181,48 @@ void pc_save_pcd(const PointCloud *c, const char *path, int stride)
 		fprintf(f, "%f %f %f\n", c->x[i], c->y[i], c->z[i]);
 
 	fclose(f);
+}
+
+void pc_morton_order(const PointCloud *src, PointCloud *dst)
+{
+	pc_init(dst);
+	pc_reserve(dst, src->n);
+	dst->n = src->n;
+	if (src->n == 0) return;
+
+	/* axis-aligned bounding box (running min starts high, max starts low) */
+	float minx = src->x[0], maxx = src->x[0];
+	float miny = src->y[0], maxy = src->y[0];
+	float minz = src->z[0], maxz = src->z[0];
+	for (int i = 1; i < src->n; i++) {
+		if (src->x[i] < minx) minx = src->x[i];
+		if (src->x[i] > maxx) maxx = src->x[i];
+		if (src->y[i] < miny) miny = src->y[i];
+		if (src->y[i] > maxy) maxy = src->y[i];
+		if (src->z[i] < minz) minz = src->z[i];
+		if (src->z[i] > maxz) maxz = src->z[i];
+	}
+
+	MortonKey *keys = malloc((size_t)src->n * sizeof *keys);
+	if (!keys) { perror("pc_morton_order"); exit(1); }
+
+	for (int i = 0; i < src->n; i++) {
+		uint32_t qx = quantize(src->x[i], minx, maxx);
+		uint32_t qy = quantize(src->y[i], miny, maxy);
+		uint32_t qz = quantize(src->z[i], minz, maxz);
+		/* spread each coord, THEN shift into its interleave slot */
+		keys[i].code = spread3(qx) | (spread3(qy) << 1) | (spread3(qz) << 2);
+		keys[i].idx  = i;
+	}
+
+	qsort(keys, (size_t)src->n, sizeof *keys, cmp_morton);
+
+	for (int j = 0; j < src->n; j++) {
+		int p = keys[j].idx;
+		dst->x[j] = src->x[p];
+		dst->y[j] = src->y[p];
+		dst->z[j] = src->z[p];
+	}
+
+	free(keys);
 }

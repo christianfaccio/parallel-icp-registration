@@ -11,6 +11,6 @@
 #SBATCH -o cuda_%j.out -e cuda_%j.err
 
 # Which versioned GPU backend to build and sweep (v0, v1, ...).
-VERSION="${VERSION:-v1}"
+VERSION="${VERSION:-v0}"
 
 bash scripts/run_cuda.sh "out/cuda/cuda_$VERSION.csv" "$VERSION" 50 12345

@@ -1,21 +1,11 @@
 /*
- * kdtreeV.c -- median-split 3D KD-tree with KD_W-wide leaf buckets, plus a
- * brute-force fallback. Vectorized with GCC/clang vector extensions; the width
- * KD_W (8 on AVX, 4 on NEON) is chosen in kdtreeV.h from the target arch.
- *
  * Differs from openmp/v1: the recursive build (build_rec) is now split into
  * OpenMP tasks. After qselect partitions perm[lo,hi) into perm[lo,mid) and
  * perm[mid,hi), those two ranges are disjoint and independent, so the two
  * recursive calls are spawned as sibling tasks instead of run serially.
- * Below TASK_MIN points, recursion falls back to a plain serial call --
- * task creation overhead dominates near the leaves.
  *
  * The node pool index `next` is shared across all tasks, so allocating a
- * slot (`(*next)++`) is done under `#pragma omp atomic capture`. Because
- * a spawned task can't hand its result back via a normal `return` to a
- * parent frame that may already have moved on, build_rec writes its node
- * index to an out-parameter instead, and the parent `#pragma omp taskwait`s
- * before reading it.
+ * slot (`(*next)++`) is done under `#pragma omp atomic capture`. 
  */
 
 #include "kdtreeV.h"

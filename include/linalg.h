@@ -4,11 +4,6 @@
 /*
  * Small dense linear algebra for ICP: 3-vectors, 3x3 matrices, a hand-rolled
  * 3x3 SVD, and the Kabsch rigid-transform solve.
- *
- * The course lecture notes cover the *parallel* tooling but not this geometry,
- * so it is fully self-contained here. 3x3 matrices are stored ROW-MAJOR in a
- * double[9]: entry (row, col) is M[row*3 + col]. Math is done in double for
- * numerical stability; point-cloud storage stays in float (see pointcloud.h).
  */
 
 typedef struct { double x, y, z; } Vec3;
