@@ -1,9 +1,3 @@
-/*
- * kdtreeV.c -- median-split 3D KD-tree with KD_W-wide leaf buckets, plus a
- * brute-force fallback. Vectorized with GCC/clang vector extensions; the width
- * KD_W (8 on AVX, 4 on NEON) is chosen in kdtreeV.h from the target arch.
- */
-
 #include "kdtreeV.h"
 
 #include <stdio.h>

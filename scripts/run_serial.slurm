@@ -10,4 +10,5 @@
 #SBATCH -t 00:20:00
 #SBATCH -o serial_%j.out -e serial_%j.err
 
-bash scripts/run_serial.sh serial.csv none 50 12345
+#bash scripts/run_serial.sh serial.csv none 50 12345
+./bin/serial/icp_serial 500000

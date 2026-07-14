@@ -3,12 +3,6 @@
 
 #include "pointcloud.h"
 
-/*
- * GPU leaf bucket size. Unlike the CPU backends (where KD_W is the SIMD width),
- * on the GPU the leaf is scanned by a single thread with a scalar loop, so this
- * is purely a tree-depth vs. bucket-scan tuning knob -- a small value (4-8)
- * keeps the tree shallow enough to limit warp divergence without over-scanning.
- */
 #define KD_W 64
 
 typedef struct {

@@ -2,10 +2,7 @@
 #define ICP_POINTCLOUD_H_
 
 /*
- * Point cloud as a Struct-of-Arrays (separate x/y/z float arrays). The SoA
- * layout is deliberate: it is what lets the per-point transform and distance
- * kernels vectorize (SIMD) and coalesce nicely on the GPU later. Storage is
- * float; the geometric math (linalg.h) is done in double.
+ * Point cloud as a SoA (separate x/y/z float arrays).
  */
 
 #include "rng.h"

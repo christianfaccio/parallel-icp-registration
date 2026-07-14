@@ -17,15 +17,13 @@
 #
 # Which versioned OpenMP backend to build and profile (v0, v1, ...), and how
 # many threads to run with.
-VERSION="${VERSION:-v0}"
+VERSION="${VERSION:-v1}"
 THREADS="${THREADS:-32}"
-N="${N:-100000}"
+N="${N:-500000}"
 
 export OMP_NUM_THREADS="$THREADS"
 export OMP_PROC_BIND=close
 export OMP_PLACES=cores
-
-make omp_$VERSION
 
 BIN="bin/openmp/icp_openmp_$VERSION"
 

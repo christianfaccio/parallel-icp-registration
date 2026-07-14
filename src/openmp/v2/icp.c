@@ -36,7 +36,7 @@ int icp_run(const PointCloud *src, const PointCloud *tgt,
 {
 	double ts0 = now_sec();
 	PointCloud cur;
-	pc_copy(src, &cur);          /* working cloud, transformed in place */
+	pc_morton_order(src, &cur);   /* working cloud: deep copy of src, Morton-ordered */
 
 	KDTreeV tree;
 	if (prm->use_kdtree) kd_build(&tree, tgt);

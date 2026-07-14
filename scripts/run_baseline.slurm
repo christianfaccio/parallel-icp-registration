@@ -10,4 +10,5 @@
 #SBATCH -t 00:20:00
 #SBATCH -o serial_%j.out -e serial_%j.err
 
-bash scripts/run_baseline.sh baseline.csv none 50 12345
+#bash scripts/run_baseline.sh baseline.csv none 50 12345
+./bin/baseline/icp_baseline 500000
