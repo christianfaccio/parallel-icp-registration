@@ -28,7 +28,7 @@ export LC_ALL=C   # force '.' decimal separator so awk printf doesn't emit comma
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-VERSION="${2:-v0}"
+VERSION="${2:-v3}"
 BIN="$HERE/bin/openmp/icp_openmp_$VERSION"
 
 OUT="${1:-out/openmp/omp_$VERSION.csv}"
