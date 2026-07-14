@@ -17,7 +17,7 @@
 #
 # Which versioned OpenMP backend to build and profile (v0, v1, ...), and how
 # many threads to run with.
-VERSION="${VERSION:-v1}"
+VERSION="${VERSION:-v3}"
 THREADS="${THREADS:-32}"
 N="${N:-500000}"
 

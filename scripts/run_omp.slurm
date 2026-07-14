@@ -14,7 +14,7 @@
 export SRUN_CPUS_PER_TASK="${SLURM_CPUS_PER_TASK}"   # keep srun affinity sane if used
 
 # Which versioned OpenMP backend to build and sweep (v0, v1, ...).
-VERSION="${VERSION:-v0}"
+VERSION="${VERSION:-v3}"
 
 make omp_$VERSION
 bash scripts/run_omp.sh "out/openmp/omp_$VERSION.csv" "$VERSION" 50 12345
